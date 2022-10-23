@@ -106,8 +106,8 @@ class Attention(nn.Module):
         attn = (q @ k.transpose(-2, -1)) * self.scale
         attn = self.qact_attn1(attn)
         # TODO:
-        # attn = self.log_int_softmax(attn, self.qact_attn1.quantizer.scale)
-        attn = attn.softmax(dim=-1)
+        attn = self.log_int_softmax(attn, self.qact_attn1.quantizer.scale)
+        # attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
         x = self.qact2(x)
@@ -180,19 +180,15 @@ class Block(nn.Module):
                           quantizer_str=cfg.QUANTIZER_A_LN)
 
     def forward(self, x, last_quantizer=None):
-        # TODO:
-        # x = self.qact2(x + self.drop_path(
-        #     self.attn(
-        #         self.qact1(self.norm1(x, last_quantizer,
-        #                               self.qact1.quantizer)))))
-        # x = self.qact4(x + self.drop_path(
-        #     self.mlp(
-        #         self.qact3(
-        #             self.norm2(x, self.qact2.quantizer,
-        #                        self.qact3.quantizer)))))
-        x = self.qact2(
-            x + self.drop_path(self.attn(self.qact1(self.norm1(x)))))
-        x = self.qact4(x + self.drop_path(self.mlp(self.qact3(self.norm2(x)))))
+        x = self.qact2(x + self.drop_path(
+            self.attn(
+                self.qact1(self.norm1(x, last_quantizer,
+                                      self.qact1.quantizer)))))
+        x = self.qact4(x + self.drop_path(
+            self.mlp(
+                self.qact3(
+                    self.norm2(x, self.qact2.quantizer,
+                               self.qact3.quantizer)))))
         return x
 
 
@@ -231,10 +227,6 @@ class VisionTransformer(nn.Module):
         norm_layer = norm_layer or partial(nn.LayerNorm, eps=1e-6)
 
         self.cfg = cfg
-        # print('bit_type',cfg.BIT_TYPE_A)
-        # print('calibration_mode',cfg.CALIBRATION_MODE_A)
-        # print('observer_str',cfg.OBSERVER_A)
-        # print('quantizer_str',cfg.QUANTIZER_A)
         self.input_quant = input_quant
         if input_quant:
             self.qact_input = QAct(quant=quant,
@@ -411,9 +403,8 @@ class VisionTransformer(nn.Module):
                 i - 1].qact4.quantizer
             x = blk(x, last_quantizer)
 
-        # x = self.norm(x, self.blocks[-1].qact4.quantizer,
-        #               self.qact2.quantizer)[:, 0]
-        x = self.norm(x)[:, 0]
+        x = self.norm(x, self.blocks[-1].qact4.quantizer,
+                      self.qact2.quantizer)[:, 0]
         x = self.qact2(x)
         x = self.pre_logits(x)
         return x
@@ -437,7 +428,7 @@ def deit_tiny_patch16_224(pretrained=False,
         num_heads=3,
         mlp_ratio=4,
         qkv_bias=True,
-        norm_layer=None,
+        norm_layer=partial(QIntLayerNorm, eps=1e-6),
         quant=quant,
         calibrate=calibrate,
         input_quant=True,
@@ -466,7 +457,7 @@ def deit_small_patch16_224(pretrained=False,
                               num_heads=6,
                               mlp_ratio=4,
                               qkv_bias=True,
-                              norm_layer=None,
+                              norm_layer=partial(QIntLayerNorm, eps=1e-6),
                               quant=quant,
                               calibrate=calibrate,
                               input_quant=True,
@@ -493,7 +484,7 @@ def deit_base_patch16_224(pretrained=False,
                               num_heads=12,
                               mlp_ratio=4,
                               qkv_bias=True,
-                              norm_layer=None,
+                              norm_layer=partial(QIntLayerNorm, eps=1e-6),
                               quant=quant,
                               calibrate=calibrate,
                               input_quant=True,
@@ -520,7 +511,7 @@ def vit_base_patch16_224(pretrained=False,
                               num_heads=12,
                               mlp_ratio=4,
                               qkv_bias=True,
-                              norm_layer=None,
+                              norm_layer=partial(QIntLayerNorm, eps=1e-6),
                               quant=quant,
                               calibrate=calibrate,
                               input_quant=True,
@@ -545,7 +536,7 @@ def vit_large_patch16_224(pretrained=False,
                               num_heads=16,
                               mlp_ratio=4,
                               qkv_bias=True,
-                              norm_layer=None,
+                              norm_layer=partial(QIntLayerNorm, eps=1e-6),
                               quant=quant,
                               calibrate=calibrate,
                               input_quant=False,

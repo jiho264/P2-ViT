@@ -11,6 +11,7 @@ from PIL import Image
 
 from config import Config
 from models import *
+from generate_data import generate_data
 
 parser = argparse.ArgumentParser(description='FQ-ViT')
 
@@ -27,13 +28,19 @@ parser.add_argument('--lis', default=False, action='store_true')
 parser.add_argument('--quant-method',
                     default='minmax',
                     choices=['minmax', 'ema', 'omse', 'percentile'])
+# TODO: 100 --> 32
 parser.add_argument('--calib-batchsize',
-                    default=100,
+                    default=32,
                     type=int,
                     help='batchsize of calibration set')
-parser.add_argument('--calib-iter', default=10, type=int)
+parser.add_argument("--mode", default=0,
+                        type=int, 
+                        help="mode of calibration data, 0: PSAQ-ViT, 1: Gaussian noise, 2: Real data")
+# TODO: 10 --> 1
+parser.add_argument('--calib-iter', default=1, type=int)
+# TODO: 100 --> 200
 parser.add_argument('--val-batchsize',
-                    default=100,
+                    default=200,
                     type=int,
                     help='batchsize of validation set')
 parser.add_argument('--num-workers',
@@ -129,32 +136,54 @@ def main():
     criterion = nn.CrossEntropyLoss().to(device)
 
     if args.quant:
-        train_dataset = datasets.ImageFolder(traindir, train_transform)
-        train_loader = torch.utils.data.DataLoader(
-            train_dataset,
-            batch_size=args.calib_batchsize,
-            shuffle=True,
-            num_workers=args.num_workers,
-            pin_memory=True,
-            drop_last=True,
-        )
-        # Get calibration set.
-        image_list = []
-        for i, (data, target) in enumerate(train_loader):
-            if i == args.calib_iter:
-                break
-            data = data.to(device)
-            image_list.append(data)
+        # TODO:
+        # Get calibration set
+        # Case 0: PASQ-ViT
+        if args.mode == 0:
+            print("Generating data...")
+            calibrate_data = generate_data(args)
+            print("Calibrating with generated data...")
+            model.model_open_calibrate()
+            with torch.no_grad():
+                model.model_open_last_calibrate()
+                output = model(calibrate_data)
+        # Case 1: Gaussian noise
+        elif args.mode == 1:
+            calibrate_data = torch.randn((args.calib_batchsize, 3, 224, 224)).to(device)
+            print("Calibrating with Gaussian noise...")
+            model.model_open_calibrate()
+            with torch.no_grad():
+                model.model_open_last_calibrate()
+                output = model(calibrate_data)
+        # Case 2: Real data (Standard)
+        elif args.mode == 2:
+            train_dataset = datasets.ImageFolder(traindir, train_transform)
+            train_loader = torch.utils.data.DataLoader(
+                train_dataset,
+                batch_size=args.calib_batchsize,
+                shuffle=True,
+                num_workers=args.num_workers,
+                pin_memory=True,
+                drop_last=True,
+            )
+            # Get calibration set.
+            image_list = []
+            for i, (data, target) in enumerate(train_loader):
+                if i == args.calib_iter:
+                    break
+                data = data.to(device)
+                image_list.append(data)
 
-        print('Calibrating...')
-        model.model_open_calibrate()
-        with torch.no_grad():
-            for i, image in enumerate(image_list):
-                if i == len(image_list) - 1:
-                    # This is used for OMSE method to
-                    # calculate minimum quantization error
-                    model.model_open_last_calibrate()
-                output = model(image)
+            print("Calibrating with real data...")
+            model.model_open_calibrate()
+            with torch.no_grad():
+                for i, image in enumerate(image_list):
+                    if i == len(image_list) - 1:
+                        # This is used for OMSE method to
+                        # calculate minimum quantization error
+                        model.model_open_last_calibrate()
+                    output = model(image)
+
         model.model_close_calibrate()
         model.model_quant()
 

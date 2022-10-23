@@ -1,0 +1,2 @@
+CUDA_VISIBLE_DEVICES=1 python test_quant.py vit_base /home/shared_data/imagenet --quant --ptf --lis --quant-method minmax --mode 1
+# CUDA_VISIBLE_DEVICES=0 python test_quant.py vit_base /home/shared_data/imagenet --quant --quant-method minmax --mode 2
