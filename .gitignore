@@ -123,4 +123,5 @@ datasets/
 *.py~
 *.sh~
 pretrained_ckpt/
+logs/
 
