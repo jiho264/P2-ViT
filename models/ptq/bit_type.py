@@ -42,6 +42,7 @@ class BitType:
 BIT_TYPE_LIST = [
     BitType(4, False, 'uint4'),
     BitType(8, True, 'int8'),
+    BitType(4, True, 'int4'),
     BitType(8, False, 'uint8')
 ]
 BIT_TYPE_DICT = {bit_type.name: bit_type for bit_type in BIT_TYPE_LIST}
