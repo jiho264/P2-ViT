@@ -20,8 +20,9 @@ class Config:
         self.QUANTIZER_W = 'uniform'
         self.QUANTIZER_A = 'uniform'
         self.QUANTIZER_A_LN = 'uniform'
-
-        self.CALIBRATION_MODE_W = 'channel_wise'
+        # TODO:
+        self.CALIBRATION_MODE_W = 'hw_channel_wise'
+        # self.CALIBRATION_MODE_W = 'layer_wise'
         self.CALIBRATION_MODE_A = 'layer_wise'
         self.CALIBRATION_MODE_S = 'layer_wise'
 

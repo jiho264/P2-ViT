@@ -139,7 +139,7 @@ def main():
         # TODO:
         # Get calibration set
         # Case 0: PASQ-ViT
-        if args.mode == 0:
+        if args.mode == 2:
             print("Generating data...")
             calibrate_data = generate_data(args)
             print("Calibrating with generated data...")
@@ -156,7 +156,7 @@ def main():
                 model.model_open_last_calibrate()
                 output = model(calibrate_data)
         # Case 2: Real data (Standard)
-        elif args.mode == 2:
+        elif args.mode == 0:
             train_dataset = datasets.ImageFolder(traindir, train_transform)
             train_loader = torch.utils.data.DataLoader(
                 train_dataset,

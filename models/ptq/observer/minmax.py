@@ -28,6 +28,7 @@ class MinmaxObserver(BaseObserver):
             self.max_val = self.max_val.max()
             self.min_val = self.min_val.min()
 
+
     def get_quantization_params(self, *args, **kwargs):
         max_val = self.max_val
         min_val = self.min_val
@@ -36,14 +37,53 @@ class MinmaxObserver(BaseObserver):
         qmin = self.bit_type.lower_bound
 
         scale = torch.ones_like(max_val, dtype=torch.float32)
-        zero_point = torch.zeros_like(max_val, dtype=torch.int64)
+        zero_point = torch.zeros_like(max_val.max(), dtype=torch.int64)
 
         if self.symmetric:
-            max_val = torch.max(-min_val, max_val)
-            scale = max_val / (float(qmax - qmin) / 2)
-            scale.clamp_(self.eps)
-            zero_point = torch.zeros_like(max_val, dtype=torch.int64)
+            # TODO: add the hardware friendly channel-wise quantization scheme
+            # FIXME:
+            if self.calibration_mode == 'hw_channel_wise':
+                scale_global = torch.ones_like(max_val.max(), dtype=torch.float32)
+                # zero_point = torch.zeros_like(max_val.max(), dtype=torch.int64)
+                max_val_global = torch.max(-(min_val.min()), max_val.max())
+                # FIXME:
+                K = 3
+                scale_global = max_val_global / (float(qmax - qmin) / 2) / 2**K
+                scale_global.clamp_(self.eps)
+                scale_original = torch.ones_like(max_val, dtype=torch.float32)
+                max_val = torch.max(-min_val, max_val)
+                scale_original = max_val / (float(qmax - qmin) / 2)
+                scale_original.clamp_(self.eps)
+                ratio = torch.ones_like(max_val, dtype=torch.float32)
+                ratio = (scale_original / scale_global)
+                def round_ln(x, k):
+                    y = torch.floor(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
+                    out = torch.gt((x-2**y),(2**(y+1)-x))
+                    # print((out+y).min())
+                    # TODO:
+                    return torch.clamp((out+y), min=-1, max=k-1)
+                    # return torch.clamp((out+y), min=0, max=k)
+                    # ############### round() ##################
+                    # y = (torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda()))).round()
+                    # print(y)
+                    # TODO:
+                    # return torch.clamp(y, min=-1, max=k-1)
+                    # return torch.clamp(y, min=0, max=k)
+
+                alpha = round_ln(ratio, K)
+                # print(alpha)
+                scale = scale_global*2**alpha
+                scale.clamp_(self.eps)
+                # print(torch.max(-((scale-scale_original)/scale_original).min()*100, ((scale-scale_original)/scale_original).max())*100)
+                
+            else:
+                zero_point = torch.zeros_like(max_val, dtype=torch.int64)
+                max_val = torch.max(-min_val, max_val)
+                scale = max_val / (float(qmax - qmin) / 2)
+                scale.clamp_(self.eps)
+                zero_point = torch.zeros_like(max_val, dtype=torch.int64)
         else:
+            zero_point = torch.zeros_like(max_val, dtype=torch.int64)
             scale = (max_val - min_val) / float(qmax - qmin)
             scale.clamp_(self.eps)
             zero_point = qmin - torch.round(min_val / scale)
