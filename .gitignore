@@ -124,4 +124,5 @@ datasets/
 *.sh~
 pretrained_ckpt/
 logs/
+pretrained_model/
 

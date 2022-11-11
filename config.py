@@ -12,7 +12,9 @@ class Config:
         # TODO:
         # self.BIT_TYPE_W = BIT_TYPE_DICT['int8']
         self.BIT_TYPE_W = BIT_TYPE_DICT['int4']
-        self.BIT_TYPE_A = BIT_TYPE_DICT['uint8']
+        # TODO:
+        # self.BIT_TYPE_A = BIT_TYPE_DICT['uint8']
+        self.BIT_TYPE_A = BIT_TYPE_DICT['int8']
 
         self.OBSERVER_W = 'minmax'
         self.OBSERVER_A = quant_method
@@ -21,7 +23,8 @@ class Config:
         self.QUANTIZER_A = 'uniform'
         self.QUANTIZER_A_LN = 'uniform'
         # TODO:
-        self.CALIBRATION_MODE_W = 'hw_channel_wise'
+        # self.CALIBRATION_MODE_W = 'hw_channel_wise'
+        self.CALIBRATION_MODE_W = 'channel_wise'
         # self.CALIBRATION_MODE_W = 'layer_wise'
         self.CALIBRATION_MODE_A = 'layer_wise'
         self.CALIBRATION_MODE_S = 'layer_wise'
