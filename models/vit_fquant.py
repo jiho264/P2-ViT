@@ -353,13 +353,16 @@ class VisionTransformer(nn.Module):
         self.head = (nn.Linear(self.embed_dim, num_classes)
                      if num_classes > 0 else nn.Identity())
 
-    def model_quant(self):
+    def model_quant(self, flag='on'):
         for m in self.modules():
             if type(m) in [QConv2d, QLinear, QAct, QIntSoftmax]:
                 m.quant = True
             if self.cfg.INT_NORM:
                 if type(m) in [QIntLayerNorm]:
-                    m.mode = 'int'
+                    if flag == 'off':
+                        pass
+                    else:
+                        m.mode = 'int'
 
     def model_dequant(self):
         for m in self.modules():

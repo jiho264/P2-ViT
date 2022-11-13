@@ -177,12 +177,16 @@ def main():
             print("Calibrating with real data...")
             model.model_open_calibrate()
             with torch.no_grad():
-                for i, image in enumerate(image_list):
-                    if i == len(image_list) - 1:
-                        # This is used for OMSE method to
-                        # calculate minimum quantization error
-                        model.model_open_last_calibrate()
-                    output = model(image)
+                # TODO:
+                # for i, image in enumerate(image_list):
+                #     if i == len(image_list) - 1:
+                #         # This is used for OMSE method to
+                #         # calculate minimum quantization error
+                #         model.model_open_last_calibrate()
+                #     output = model(image)
+                # model.model_quant(flag='off')
+                model.model_open_last_calibrate()
+                output = model(image_list[0])
 
         model.model_close_calibrate()
         model.model_quant()

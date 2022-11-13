@@ -55,8 +55,8 @@ class MinmaxObserver(BaseObserver):
             # for j in range(self.v.shape[0]):
             
         def round_x(scale, x, zero_point=0):
-            alpha_round = round_ln(scale, 'round')
-            alpha_floor = round_ln(scale, 'floor')
+            alpha_round = round_ln(scale, 'round').cuda()
+            alpha_floor = round_ln(scale, 'floor').cuda()
             alpha = alpha_round
             zero_point = torch.Tensor([zero_point]).cuda()
             # print(scale.shape)
@@ -66,9 +66,9 @@ class MinmaxObserver(BaseObserver):
                 dim = scale.shape[0]
             for j in range(dim):
                 if dim == 1:
-                    weight = x
+                    weight = x.cuda()
                 else:
-                    weight = x[j,...].unsqueeze(0)
+                    weight = x[j,...].unsqueeze(0).cuda()
                 weight_1 = ((weight / 2**alpha_floor[j] + zero_point).round().clamp(qmin, qmax) -
                 zero_point) * 2**alpha_floor[j]
                 weight_2 = ((weight / 2**(alpha_floor[j]+1) + zero_point).round().clamp(qmin, qmax) -
@@ -112,26 +112,24 @@ class MinmaxObserver(BaseObserver):
                 max_val = torch.max(-min_val, max_val)
                 scale = max_val / (float(qmax - qmin) / 2)
                 # TODO: ########### 2^n ############
-                # if self.module_type in ['conv_weight', 'linear_weight']:
-                #     # alpha_round = round_ln(scale, 'round')
-                #     alpha_x = round_x(scale, self.v)
-                #     # print(alpha_round==alpha_x)
-                #     scale = 2**alpha_x
-                # elif self.module_type == 'activation':
-                #     # alpha_round = round_ln(scale, 'round')
-                #     alpha_x = round_x(scale, self.v)
-                #     # print(alpha_round==alpha_x)
-                #     scale = 2**alpha_x
-                # alpha_round = round_ln(scale, 'round')
-                alpha_x = round_x(scale, self.v)
-                # print(alpha_round==alpha_x)
-                scale = 2**alpha_x
-            # ####################################
+                if self.module_type in ['conv_weight', 'linear_weight']:
+                    alpha_round = round_ln(scale, 'round')
+                    alpha_x = round_x(scale, self.v)
+                    # # print(alpha_round==alpha_x)
+                    scale = 2**alpha_x
+                    # pass
+                elif self.module_type == 'activation':
+                    alpha_round = round_ln(scale, 'round')
+                    alpha_x = round_x(scale, self.v)
+                    # # print(alpha_round==alpha_x)
+                    scale = 2**alpha_x
+                    # pass
+                # ####################################
                 scale.clamp_(self.eps)
         else:
             # zero_point = torch.zeros_like(max_val, dtype=torch.int64)
             scale = (max_val - min_val) / float(qmax - qmin)
-            # ########### 2^n ############
+            # TODO: ########### 2^n ############
             # alpha = round_ln(scale, 'round')
             # scale = 2**alpha
             ####################################

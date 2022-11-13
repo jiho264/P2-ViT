@@ -122,7 +122,9 @@ class PtfObserver(BaseObserver):
             score4 = lp_loss(data, data_q4, p=2.0, reduction='all')
             score8 = lp_loss(data, data_q8, p=2.0, reduction='all')
             score = [score0, score1, score2, score4, score8]
+            # score = [score1, score2, score4, score8]
             scale_mask[j] *= 2**score.index(min(score))
+        # TODO:
         scale = scale0 * scale_mask
         return scale, zero_point
 

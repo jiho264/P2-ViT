@@ -24,7 +24,7 @@ class UniformQuantizer(BaseQuantizer):
         range_shape = self.get_reshape_range(inputs)
         scale = scale.reshape(range_shape)
         zero_point = zero_point.reshape(range_shape)
-        outputs = inputs / scale + zero_point
+        outputs = inputs.cuda() / scale.cuda() + zero_point.cuda()
         outputs = outputs.round().clamp(self.bit_type.lower_bound,
                                         self.bit_type.upper_bound)
         return outputs
@@ -37,5 +37,5 @@ class UniformQuantizer(BaseQuantizer):
         range_shape = self.get_reshape_range(inputs)
         scale = scale.reshape(range_shape)
         zero_point = zero_point.reshape(range_shape)
-        outputs = (inputs - zero_point) * scale
+        outputs = (inputs.cuda() - zero_point.cuda()) * scale.cuda()
         return outputs
