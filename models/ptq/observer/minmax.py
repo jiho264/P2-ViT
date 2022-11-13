@@ -2,6 +2,7 @@
 import torch
 
 from .base import BaseObserver
+from .utils import lp_loss
 
 
 class MinmaxObserver(BaseObserver):
@@ -12,7 +13,9 @@ class MinmaxObserver(BaseObserver):
         self.symmetric = self.bit_type.signed
 
     def update(self, v):
+        self.v = v
         v = self.reshape_tensor(v)
+        # self.v = v
         cur_max = v.max(axis=1).values
         if self.max_val is None:
             self.max_val = cur_max
@@ -48,22 +51,36 @@ class MinmaxObserver(BaseObserver):
                 y = torch.floor(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
                 out = torch.gt((x-2**y),(2**(y+1)-x))
                 return out+y
-            # y = torch.floor(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
-            # out = torch.gt((x-2**y),(2**(y+1)-x))
-            # # print((out+y).min())
-            # if k:
-            #     # # TODO:
-            #     # return torch.clamp((out+y), min=-1, max=k-1)
-            #     return torch.clamp((out+y), min=0, max=k)
-            # else:
-            #     return out+y
-                # return y
-            ############### round() ##################
-            # y = (torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda()))).round()
-            # # print(y)
-            # # TODO:
-            # return torch.clamp(y, min=-1, max=k-1)
-            # return torch.clamp(y, min=0, max=k)
+            # floor = torch.floor(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
+            # for j in range(self.v.shape[0]):
+            
+        def round_x(scale, x, zero_point=0):
+            alpha_round = round_ln(scale, 'round')
+            alpha_floor = round_ln(scale, 'floor')
+            alpha = alpha_round
+            zero_point = torch.Tensor([zero_point]).cuda()
+            # print(scale.shape)
+            if self.calibration_mode == 'layer_wise':
+                dim = 1
+            else:
+                dim = scale.shape[0]
+            for j in range(dim):
+                if dim == 1:
+                    weight = x
+                else:
+                    weight = x[j,...].unsqueeze(0)
+                weight_1 = ((weight / 2**alpha_floor[j] + zero_point).round().clamp(qmin, qmax) -
+                zero_point) * 2**alpha_floor[j]
+                weight_2 = ((weight / 2**(alpha_floor[j]+1) + zero_point).round().clamp(qmin, qmax) -
+                zero_point) * 2**(alpha_floor[j]+1)
+                score1 = lp_loss(weight, weight_1, p=2.0, reduction='all')
+                score2 = lp_loss(weight, weight_2, p=2.0, reduction='all')
+                score = [score1, score2]
+                if score.index(min(score)) == 0:
+                    alpha[j] = alpha_floor[j]
+                else:
+                    alpha[j] = alpha_floor[j]+1
+            return alpha
 
         if self.symmetric:
             # TODO: add the hardware friendly channel-wise quantization scheme
@@ -96,18 +113,26 @@ class MinmaxObserver(BaseObserver):
                 scale = max_val / (float(qmax - qmin) / 2)
                 # TODO: ########### 2^n ############
                 # if self.module_type in ['conv_weight', 'linear_weight']:
-                #     alpha = round_ln(scale, 'round')
-                # # elif self.module_type == 'activation':
-                # #     # FIXME:
-                # #     alpha = round_ln(scale, 'floor')
-                #     scale = 2**alpha
-                # ####################################
+                #     # alpha_round = round_ln(scale, 'round')
+                #     alpha_x = round_x(scale, self.v)
+                #     # print(alpha_round==alpha_x)
+                #     scale = 2**alpha_x
+                # elif self.module_type == 'activation':
+                #     # alpha_round = round_ln(scale, 'round')
+                #     alpha_x = round_x(scale, self.v)
+                #     # print(alpha_round==alpha_x)
+                #     scale = 2**alpha_x
+                # alpha_round = round_ln(scale, 'round')
+                alpha_x = round_x(scale, self.v)
+                # print(alpha_round==alpha_x)
+                scale = 2**alpha_x
+            # ####################################
                 scale.clamp_(self.eps)
         else:
             # zero_point = torch.zeros_like(max_val, dtype=torch.int64)
             scale = (max_val - min_val) / float(qmax - qmin)
-            # TODO: ########### 2^n ############
-            # alpha = round_ln(scale)
+            # ########### 2^n ############
+            # alpha = round_ln(scale, 'round')
             # scale = 2**alpha
             ####################################
             scale.clamp_(self.eps)
