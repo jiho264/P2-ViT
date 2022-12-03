@@ -161,12 +161,39 @@ class Mlp(nn.Module):
                           quantizer_str=cfg.QUANTIZER_A)
         self.drop = nn.Dropout(drop)
 
-    def forward(self, x):
-        x = self.fc1(x)
+    def forward(self, x, FLOPs, global_distance, ffn_bit_config):
+        # x = self.fc1(x)
+        # x[0] = self.act(x[0])
+        # x[1] = self.act(x[1])
+        # x = self.qact1(x)
+        # x[0] = self.drop(x[0])
+        # x[1] = self.drop(x[1])
+        # x = self.fc2(x)
+        # x = self.qact2(x)
+        # x[0] = self.drop(x[0])
+        # x[1] = self.drop(x[1])
+        B, N, C = x.shape
+        if ffn_bit_config:
+            bit_config = ffn_bit_config[0]
+        else:
+            bit_config = None
+        x = self.fc1(x, global_distance, bit_config)
+        B, N, M = x.shape
+        FLOPs.append(N*C*M)
+        
         x = self.act(x)
         x = self.qact1(x)
         x = self.drop(x)
-        x = self.fc2(x)
+        
+        B, N, C = x.shape
+        if ffn_bit_config:
+            bit_config = ffn_bit_config[1]
+        else:
+            bit_config = None
+        x = self.fc2(x, global_distance, bit_config)
+        B, N, M = x.shape
+        FLOPs.append(N*C*M)
+        
         x = self.qact2(x)
         x = self.drop(x)
         return x
@@ -204,6 +231,7 @@ class PatchEmbed(nn.Module):
                             calibration_mode=cfg.CALIBRATION_MODE_W,
                             observer_str=cfg.OBSERVER_W,
                             quantizer_str=cfg.QUANTIZER_W)
+        self.patch_size = patch_size
         if norm_layer:
             self.qact_before_norm = QAct(
                 quant=quant,
@@ -229,13 +257,35 @@ class PatchEmbed(nn.Module):
                              observer_str=cfg.OBSERVER_A,
                              quantizer_str=cfg.QUANTIZER_A)
 
-    def forward(self, x):
+    def forward(self, x, FLOPs, bit_config):
+        # B, C, H, W = x[0].shape
+        # # FIXME look at relaxing size constraints
+        # assert (
+        #     H == self.img_size[0] and W == self.img_size[1]
+        # ), f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
+        # # x = self.proj(x).flatten(2).transpose(1, 2)
+        # x = self.proj(x)
+        # x[0] = x[0].flatten(2).transpose(1, 2)
+        # x[1] = x[1].flatten(2).transpose(1, 2)
+        # x[0] = self.qact_before_norm(x[0])
+        # x[1] = self.qact_before_norm(x[1])
+        # if isinstance(self.norm, nn.Identity):
+        #     x[0] = self.norm(x[0])
+        #     x[1] = self.norm(x[1])
+        # else:
+        #     x = self.norm(x, self.qact_before_norm.quantizer,
+        #                   self.qact.quantizer)
+        # x = self.qact(x)
         B, C, H, W = x.shape
         # FIXME look at relaxing size constraints
         assert (
             H == self.img_size[0] and W == self.img_size[1]
         ), f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
-        x = self.proj(x).flatten(2).transpose(1, 2)
+        x = self.proj(x, bit_config)
+        B, M, H, W = x.shape
+        FLOPs.append(C*self.patch_size[0]*self.patch_size[0]*M*H*W)
+        x = x.flatten(2).transpose(1, 2)
+        
         x = self.qact_before_norm(x)
         if isinstance(self.norm, nn.Identity):
             x = self.norm(x)

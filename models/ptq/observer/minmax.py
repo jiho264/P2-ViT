@@ -3,6 +3,7 @@ import torch
 
 from .base import BaseObserver
 from .utils import lp_loss
+from torch.nn import functional as F
 
 
 class MinmaxObserver(BaseObserver):
@@ -32,9 +33,11 @@ class MinmaxObserver(BaseObserver):
             self.min_val = self.min_val.min()
 
 
-    def get_quantization_params(self, *args, **kwargs):
+    def get_quantization_params(self, x, others=None, *args, **kwargs):
         max_val = self.max_val
         min_val = self.min_val
+        self.input = x
+        self.others = others
 
         qmax = self.bit_type.upper_bound
         qmin = self.bit_type.lower_bound
@@ -53,7 +56,42 @@ class MinmaxObserver(BaseObserver):
                 return out+y
             # floor = torch.floor(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
             # for j in range(self.v.shape[0]):
+        def get_out(x, j, quant=False):
             
+            if self.calibration_mode == 'channel_wise':
+                weight = self.v[j,...].unsqueeze(0)
+                if self.others:
+                    bias = self.others[0][j].unsqueeze(0)
+            else:
+                weight = self.v
+                if self.others:
+                    bias = self.others[0]
+            # FIXME:
+            # input_gt = self.input[0]
+            # input_q = self.input[0]
+            input_gt = self.input
+            input_q = self.input
+            if self.module_type == 'activation':
+                if quant == True:
+                    return x
+                else:
+                    # return self.input[0]
+                    return self.input
+            elif self.module_type == 'conv_weight':
+                if quant == True:
+                    return F.conv2d(input_q, x, bias, self.others[1], self.others[2], self.others[3], self.others[4])
+                    # return x
+                else:
+                    return F.conv2d(input_gt, weight, bias, self.others[1], self.others[2], self.others[3], self.others[4])
+                    # return weight
+            elif self.module_type == 'linear_weight': 
+                if quant == True:
+                    return F.linear(input_q, x, bias)  
+                    # return x
+                else:
+                    return F.linear(input_gt, weight, bias)
+                    # return weight 
+
         def round_x(scale, x, zero_point=0):
             alpha_round = round_ln(scale, 'round').cuda()
             alpha_floor = round_ln(scale, 'floor').cuda()
@@ -67,14 +105,24 @@ class MinmaxObserver(BaseObserver):
             for j in range(dim):
                 if dim == 1:
                     weight = x.cuda()
+                    if self.module_type == 'activation':
+                        # FIXME:
+                        # weight = self.input[0]
+                        weight = self.input
                 else:
                     weight = x[j,...].unsqueeze(0).cuda()
                 weight_1 = ((weight / 2**alpha_floor[j] + zero_point).round().clamp(qmin, qmax) -
                 zero_point) * 2**alpha_floor[j]
+                out_1 = get_out(weight_1, j, quant=True)
+                # out_1 = weight_1
                 weight_2 = ((weight / 2**(alpha_floor[j]+1) + zero_point).round().clamp(qmin, qmax) -
                 zero_point) * 2**(alpha_floor[j]+1)
-                score1 = lp_loss(weight, weight_1, p=2.0, reduction='all')
-                score2 = lp_loss(weight, weight_2, p=2.0, reduction='all')
+                out_2 = get_out(weight_2, j, quant=True)
+                # out_2 = weight_2
+                out = get_out(weight, j, quant=False)
+                # out = weight
+                score1 = lp_loss(out, out_1, p=2.0, reduction='all')
+                score2 = lp_loss(out, out_2, p=2.0, reduction='all')
                 score = [score1, score2]
                 if score.index(min(score)) == 0:
                     alpha[j] = alpha_floor[j]
@@ -83,49 +131,22 @@ class MinmaxObserver(BaseObserver):
             return alpha
 
         if self.symmetric:
-            # TODO: add the hardware friendly channel-wise quantization scheme
-            # FIXME:
-            if self.calibration_mode == 'hw_channel_wise':
-                scale_global = torch.ones_like(max_val.max(), dtype=torch.float32)
-                # zero_point = torch.zeros_like(max_val.max(), dtype=torch.int64)
-                max_val_global = torch.max(-(min_val.min()), max_val.max())
-                # FIXME:
-                K = 3
-                scale_global = max_val_global / (float(qmax - qmin) / 2) / 2**K
-                scale_global.clamp_(self.eps)
-                scale_original = torch.ones_like(max_val, dtype=torch.float32)
-                max_val = torch.max(-min_val, max_val)
-                scale_original = max_val / (float(qmax - qmin) / 2)
-                scale_original.clamp_(self.eps)
-                ratio = torch.ones_like(max_val, dtype=torch.float32)
-                ratio = (scale_original / scale_global)
-
-                alpha = round_ln(ratio, K)
-                # print(alpha)
-                scale = scale_global*2**alpha
-                scale.clamp_(self.eps)
-                zero_point = torch.zeros_like(max_val, dtype=torch.int64)
-                # print(torch.max(-((scale-scale_original)/scale_original).min()*100, ((scale-scale_original)/scale_original).max())*100)
-                
-            else:
-                zero_point = torch.zeros_like(max_val, dtype=torch.int64)
-                max_val = torch.max(-min_val, max_val)
-                scale = max_val / (float(qmax - qmin) / 2)
-                # TODO: ########### 2^n ############
-                if self.module_type in ['conv_weight', 'linear_weight']:
-                    alpha_round = round_ln(scale, 'round')
-                    alpha_x = round_x(scale, self.v)
-                    # # print(alpha_round==alpha_x)
-                    scale = 2**alpha_x
-                    # pass
-                elif self.module_type == 'activation':
-                    alpha_round = round_ln(scale, 'round')
-                    alpha_x = round_x(scale, self.v)
-                    # # print(alpha_round==alpha_x)
-                    scale = 2**alpha_x
-                    # pass
-                # ####################################
-                scale.clamp_(self.eps)
+            zero_point = torch.zeros_like(max_val, dtype=torch.int64)
+            max_val = torch.max(-min_val, max_val)
+            scale = max_val / (float(qmax - qmin) / 2)
+            # TODO: ########### 2^n ############
+            # alpha_x = round_x(scale, self.v)
+            # scale = 2**alpha_x
+            if self.module_type in ['conv_weight', 'linear_weight']:
+                # alpha_x = round_x(scale, self.v)
+                # scale = 2**alpha_x
+                pass
+            elif self.module_type == 'activation':
+                alpha_x = round_x(scale, self.v)
+                scale = 2**alpha_x
+                # pass
+            # ####################################
+            scale.clamp_(self.eps)
         else:
             # zero_point = torch.zeros_like(max_val, dtype=torch.int64)
             scale = (max_val - min_val) / float(qmax - qmin)

@@ -34,6 +34,7 @@ class PtfObserver(BaseObserver):
     def get_quantization_params(self, inputs, *args, **kwargs):
         max_val = self.max_val
         min_val = self.min_val
+        self.inputs = inputs
 
         qmax = self.bit_type.upper_bound
         qmin = self.bit_type.lower_bound
@@ -59,7 +60,7 @@ class PtfObserver(BaseObserver):
                 out = torch.gt((x-2**y),(2**(y+1)-x))
                 return out+y
 
-        def round_x(scale, x, zero_point=0):
+        def round_x(scale, zero_point=0):
             alpha_round = round_ln(scale, 'round')
             alpha_floor = round_ln(scale, 'floor')
             alpha = alpha_round
@@ -71,13 +72,15 @@ class PtfObserver(BaseObserver):
                 #     weight = x
                 # else:
                 #     weight = x[j,:].unsqueeze(-2)
-                weight = x
+                # FIXME:
+                weight = self.inputs
+                # print(self.inputs[0]==self.v)
                 weight_1 = ((weight / 2**alpha_floor[j] + zero_point).round().clamp(qmin, qmax) -
                 zero_point) * 2**alpha_floor[j]
                 weight_2 = ((weight / 2**(alpha_floor[j]+1) + zero_point).round().clamp(qmin, qmax) -
                 zero_point) * 2**(alpha_floor[j]+1)
-                score1 = lp_loss(weight, weight_1, p=2.0, reduction='all')
-                score2 = lp_loss(weight, weight_2, p=2.0, reduction='all')
+                score1 = lp_loss(self.inputs, weight_1, p=2.0, reduction='all')
+                score2 = lp_loss(self.inputs, weight_2, p=2.0, reduction='all')
                 score = [score1, score2]
                 if score.index(min(score)) == 0:
                     alpha[j] = alpha_floor[j]
@@ -86,8 +89,7 @@ class PtfObserver(BaseObserver):
             return alpha
         # FIXME:
         alpha_ceil = round_ln(scale8, 'ceil')
-        # alpha_x = round_x(scale8, inputs)
-        # print(alpha_round==alpha_x)
+        alpha_x = round_x(scale8)
         scale8 = 2**alpha_ceil
         #############################################
         scale8.clamp_(self.eps)
@@ -105,7 +107,9 @@ class PtfObserver(BaseObserver):
 
         scale_mask = torch.ones_like(max_val)
         for j in range(inputs.shape[2]):
+            # FIXME:
             data = inputs[..., j].unsqueeze(-1)
+            data_gt = inputs[..., j].unsqueeze(-1)
             data_q0 = ((data / scale0 + zero_point).round().clamp(qmin, qmax) -
                        zero_point) * scale0
             data_q1 = ((data / scale1 + zero_point).round().clamp(qmin, qmax) -
@@ -116,11 +120,11 @@ class PtfObserver(BaseObserver):
                        zero_point) * scale4
             data_q8 = ((data / scale8 + zero_point).round().clamp(qmin, qmax) -
                        zero_point) * scale8
-            score0 = lp_loss(data, data_q0, p=2.0, reduction='all')
-            score1 = lp_loss(data, data_q1, p=2.0, reduction='all')
-            score2 = lp_loss(data, data_q2, p=2.0, reduction='all')
-            score4 = lp_loss(data, data_q4, p=2.0, reduction='all')
-            score8 = lp_loss(data, data_q8, p=2.0, reduction='all')
+            score0 = lp_loss(data_gt, data_q0, p=2.0, reduction='all')
+            score1 = lp_loss(data_gt, data_q1, p=2.0, reduction='all')
+            score2 = lp_loss(data_gt, data_q2, p=2.0, reduction='all')
+            score4 = lp_loss(data_gt, data_q4, p=2.0, reduction='all')
+            score8 = lp_loss(data_gt, data_q8, p=2.0, reduction='all')
             score = [score0, score1, score2, score4, score8]
             # score = [score1, score2, score4, score8]
             scale_mask[j] *= 2**score.index(min(score))

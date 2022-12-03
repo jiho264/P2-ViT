@@ -27,6 +27,7 @@ class BaseObserver:
             raise NotImplementedError
         return v
 
+
     def update(self, v):
         # update self.max_val and self.min_val
         raise NotImplementedError

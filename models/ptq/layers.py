@@ -3,10 +3,11 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from .bit_type import BIT_TYPE_DICT
+from .bit_type import BIT_TYPE_DICT, BIT_TYPE_LIST
 from .observer import build_observer
 from .quantizer import build_quantizer
-
+# from models import BIT_TYPE_DICT
+from .observer import utils
 
 class QConv2d(nn.Conv2d):
 
@@ -50,11 +51,21 @@ class QConv2d(nn.Conv2d):
         self.quantizer = build_quantizer(self.quantizer_str, self.bit_type,
                                          self.observer, self.module_type)
 
-    def forward(self, x):
+    def forward(self, x, bit_config):
+
         if self.calibrate:
-            self.quantizer.observer.update(self.weight)
-            if self.last_calibrate:
-                self.quantizer.update_quantization_params(x)
+            for bit_type in BIT_TYPE_LIST:
+                # FIXME:
+                self.quantizer.bit_type = bit_type
+                self.observer.bit_type = bit_type
+                if bit_type == BIT_TYPE_DICT['int8']:
+                    # TODO:
+                    self.observer.calibration_mode = 'layer_wise'
+                else: 
+                    self.observer.calibration_mode = 'channel_wise'
+                self.quantizer.observer.update(self.weight)
+                if self.last_calibrate:
+                    self.quantizer.update_quantization_params(x, others=[self.bias,self.stride,self.padding,self.dilation,self.groups])
         if not self.quant:
             return F.conv2d(
                 x,
@@ -65,9 +76,26 @@ class QConv2d(nn.Conv2d):
                 self.dilation,
                 self.groups,
             )
+        if bit_config:
+            bit_type = 'int' + str(bit_config)
+            self.quantizer.bit_type = BIT_TYPE_DICT[bit_type]
+            self.observer.bit_type = BIT_TYPE_DICT[bit_type]
         weight = self.quantizer(self.weight)
         return F.conv2d(x, weight, self.bias, self.stride, self.padding,
                         self.dilation, self.groups)
+        # y = F.conv2d(
+        #         x[0],
+        #         self.weight,
+        #         self.bias,
+        #         self.stride,
+        #         self.padding,
+        #         self.dilation,
+        #         self.groups,
+        #     )
+        # weight = self.quantizer(self.weight)
+        # y_q = F.conv2d(x[1], weight, self.bias, self.stride, self.padding,
+        #                 self.dilation, self.groups)
+        # return [y, y_q]
 
 
 class QLinear(nn.Linear):
@@ -99,13 +127,58 @@ class QLinear(nn.Linear):
         self.quantizer = build_quantizer(self.quantizer_str, self.bit_type,
                                          self.observer, self.module_type)
 
-    def forward(self, x):
-        if self.calibrate:
-            self.quantizer.observer.update(self.weight)
-            if self.last_calibrate:
-                self.quantizer.update_quantization_params(x)
+    def forward(self, x, global_distance=[], bit_config=None):
+        # if self.calibrate:
+        #     self.quantizer.observer.update(self.weight)
+        #     if self.last_calibrate:
+        #         self.quantizer.update_quantization_params(x, others=[self.bias])
+        # if not self.quant:
+        #     return F.linear(x, self.weight, self.bias)
+        # weight = self.quantizer(self.weight)
+        # return F.linear(x, weight, self.bias)
         if not self.quant:
-            return F.linear(x, self.weight, self.bias)
+            y = F.linear(x, self.weight, self.bias)
+        if self.calibrate:
+            # if self.last_calibrate: 
+            distance = []
+            for bit_type in BIT_TYPE_LIST:
+                # FIXME:
+                self.quantizer.bit_type = bit_type
+                self.observer.bit_type = bit_type
+                if bit_type == BIT_TYPE_DICT['int8']:
+                    # TODO:
+                    self.observer.calibration_mode = 'layer_wise'
+                else: 
+                    self.observer.calibration_mode = 'channel_wise'
+                
+                self.quantizer.observer.update(self.weight)
+                self.quantizer.update_quantization_params(x, others=[self.bias])
+                weight = self.quantizer(self.weight)
+                # y_q = F.linear(x, weight, self.bias)
+                # TODO:
+                # distance.append(utils.lp_loss(y, y_q, p=2.0, reduction='all'))
+                distance.append(utils.lp_loss(self.weight, weight, p=2.0, reduction='all'))
+            global_distance.append(distance)
+        if not self.quant:
+            return y
+        if bit_config:
+            # if bit_config == 4:
+            #     self.quantizer.bit_type = BIT_TYPE_DICT['int4']
+            #     self.observer.bit_type = BIT_TYPE_DICT['int4']
+            # elif bit_config == 6:
+            #     self.quantizer.bit_type = BIT_TYPE_DICT['int6']
+            #     self.observer.bit_type = BIT_TYPE_DICT['int6']
+            # elif bit_config == 8:
+            #     self.quantizer.bit_type = BIT_TYPE_DICT['int8']
+            #     self.observer.bit_type = BIT_TYPE_DICT['int8']
+            # elif bit_config == 10:
+            #     self.quantizer.bit_type = BIT_TYPE_DICT['int10']
+            #     self.observer.bit_type = BIT_TYPE_DICT['int10']
+            # else:
+            #     assert bit_config==4 or bit_config == 6 or bit_config==8
+            bit_type = 'int' + str(bit_config)
+            self.quantizer.bit_type = BIT_TYPE_DICT[bit_type]
+            self.observer.bit_type = BIT_TYPE_DICT[bit_type]
         weight = self.quantizer(self.weight)
         return F.linear(x, weight, self.bias)
 
@@ -146,6 +219,9 @@ class QAct(nn.Module):
             return x
         x = self.quantizer(x)
         return x
+        # y = x[0]
+        # y_q = self.quantizer(x[1])
+        # return [y, y_q]
 
 
 class QIntLayerNorm(nn.LayerNorm):
@@ -167,8 +243,14 @@ class QIntLayerNorm(nn.LayerNorm):
                 in_quantizer=None,
                 out_quantizer=None,
                 in_scale_expand=1):
+        
+        # y = F.layer_norm(x[0], self.normalized_shape, self.weight, self.bias,
+        #                      self.eps)
+        # if self.mode == 'ln':
+        #     y_q = F.layer_norm(x[1], self.normalized_shape, self.weight, self.bias,
+        #                      self.eps)
         if self.mode == 'ln':
-            x = F.layer_norm(x, self.normalized_shape, self.weight, self.bias,
+            return F.layer_norm(x, self.normalized_shape, self.weight, self.bias,
                              self.eps)
         elif self.mode == 'int':
             in_scale = in_quantizer.scale
@@ -195,15 +277,15 @@ class QIntLayerNorm(nn.LayerNorm):
             A_sign = A.sign()
             M, N = self.get_MN(A.abs())
             B = ((self.bias.reshape(1, 1, -1) -
-                  (mean_x_q / std_x_q).unsqueeze(-1) *
-                  self.weight.reshape(1, 1, -1)) / out_scale *
-                 torch.pow(2, N)).round()
+                    (mean_x_q / std_x_q).unsqueeze(-1) *
+                    self.weight.reshape(1, 1, -1)) / out_scale *
+                    torch.pow(2, N)).round()
 
             x_q = ((A_sign * M * x_q + B) / torch.pow(2, N)).round()
-            x = x_q * out_scale
+            return x_q * out_scale
         else:
             raise NotImplementedError
-        return x
+        # return [y, y_q]
 
 
 class QIntSoftmax(nn.Module):
@@ -289,12 +371,42 @@ class QIntSoftmax(nn.Module):
             deq_softmax[mask] = 0
             return deq_softmax
         else:
+            # x = x.softmax(dim=-1)
+            # if self.calibrate:
+            #     self.quantizer.observer.update(x)
+            #     if self.last_calibrate:
+            #         self.quantizer.update_quantization_params(x)
+            # if not self.quant:
+            #     return x
+            # x = self.quantizer(x)
+            # return x
             x = x.softmax(dim=-1)
-            if self.calibrate:
-                self.quantizer.observer.update(x)
-                if self.last_calibrate:
-                    self.quantizer.update_quantization_params(x)
+            # if self.calibrate:
+            #     self.quantizer.observer.update(x)
+            #     if self.last_calibrate:
+            #         self.quantizer.update_quantization_params(x)
             if not self.quant:
                 return x
-            x = self.quantizer(x)
+            # x = self.quantizer(x)
             return x
+
+        # y = x[0].softmax(dim=-1)
+        # # if self.log_i_softmax:
+        # exp_int, exp_int_sum = self.int_softmax(x[1], scale)
+        # softmax_out = torch.round(exp_int_sum / exp_int)
+        # rounds = self.log_round(softmax_out)
+        # mask = rounds >= 2**self.bit_type.bits
+        # qlog = torch.clamp(rounds, 0, 2**self.bit_type.bits - 1)
+        # deq_softmax = 2**(-qlog)
+        # deq_softmax[mask] = 0
+        # y_q = deq_softmax
+        # # else:
+        # #     y_q = x[1].softmax(dim=-1)
+        # if self.calibrate:
+        #     self.quantizer.observer.update(y)
+        #     if self.last_calibrate:
+        #         self.quantizer.update_quantization_params([y, y_q])
+        
+        # return [y, y_q]
+        
+        
