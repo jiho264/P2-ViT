@@ -33,7 +33,7 @@ class MinmaxObserver(BaseObserver):
             self.min_val = self.min_val.min()
 
 
-    def get_quantization_params(self, x, others=None, *args, **kwargs):
+    def get_quantization_params(self, x, others=None, asymmetric=False, *args, **kwargs):
         max_val = self.max_val
         min_val = self.min_val
         self.input = x
@@ -44,6 +44,9 @@ class MinmaxObserver(BaseObserver):
 
         scale = torch.ones_like(max_val, dtype=torch.float32)
         zero_point = torch.zeros_like(max_val, dtype=torch.int64)
+
+        if asymmetric:
+            self.symmetric = False
 
         def round_ln(x, type=None):
             if type == 'ceil':
@@ -135,24 +138,24 @@ class MinmaxObserver(BaseObserver):
             max_val = torch.max(-min_val, max_val)
             scale = max_val / (float(qmax - qmin) / 2)
             # TODO: ########### 2^n ############
-            # alpha_x = round_x(scale, self.v)
-            # scale = 2**alpha_x
-            if self.module_type in ['conv_weight', 'linear_weight']:
-                # alpha_x = round_x(scale, self.v)
-                # scale = 2**alpha_x
-                pass
-            elif self.module_type == 'activation':
-                alpha_x = round_x(scale, self.v)
-                scale = 2**alpha_x
-                # pass
+            alpha_x = round_x(scale, self.v)
+            scale = 2**alpha_x
+            # if self.module_type in ['conv_weight', 'linear_weight']:
+            #     # alpha_x = round_x(scale, self.v)
+            #     # scale = 2**alpha_x
+            #     pass
+            # elif self.module_type == 'activation':
+            #     alpha_x = round_x(scale, self.v)
+            #     scale = 2**alpha_x
+            #     # pass
             # ####################################
             scale.clamp_(self.eps)
         else:
             # zero_point = torch.zeros_like(max_val, dtype=torch.int64)
             scale = (max_val - min_val) / float(qmax - qmin)
             # TODO: ########### 2^n ############
-            # alpha = round_ln(scale, 'round')
-            # scale = 2**alpha
+            alpha_x = round_x(scale, self.v)
+            scale = 2**alpha_x
             ####################################
             scale.clamp_(self.eps)
             zero_point = qmin - torch.round(min_val / scale)

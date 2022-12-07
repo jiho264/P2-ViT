@@ -182,7 +182,8 @@ class Mlp(nn.Module):
         FLOPs.append(N*C*M)
         
         x = self.act(x)
-        x = self.qact1(x)
+        # TODO:
+        x = self.qact1(x, asymmetric=True)
         x = self.drop(x)
         
         B, N, C = x.shape

@@ -209,12 +209,12 @@ class QAct(nn.Module):
         self.quantizer = build_quantizer(self.quantizer_str, self.bit_type,
                                          self.observer, self.module_type)
 
-    def forward(self, x):
+    def forward(self, x, asymmetric=False):
         if self.calibrate:
             self.quantizer.observer.update(x)
             if self.last_calibrate:
                 # import ipdb;ipdb.set_trace()
-                self.quantizer.update_quantization_params(x)
+                self.quantizer.update_quantization_params(x, asymmetric=asymmetric)
         if not self.quant:
             return x
         x = self.quantizer(x)
