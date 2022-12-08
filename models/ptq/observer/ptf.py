@@ -42,13 +42,13 @@ class PtfObserver(BaseObserver):
         best_score = 1e+10
         # TODO:
         # ############## asymmetric ################
-        # max_val_t = max_val.max()
-        # min_val_t = min_val.min()
-        # scale8 = (max_val_t - min_val_t) / float(qmax - qmin)
+        max_val_t = max_val.max()
+        min_val_t = min_val.min()
+        scale8 = (max_val_t - min_val_t) / float(qmax - qmin)
         ################# symmetric #################
-        max_val_t = torch.max(-min_val.min(), max_val.max())
-        scale8 = torch.ones_like(max_val.max(), dtype=torch.float32)
-        scale8 = 2*max_val_t / float(qmax - qmin)
+        # max_val_t = torch.max(-min_val.min(), max_val.max())
+        # scale8 = torch.ones_like(max_val.max(), dtype=torch.float32)
+        # scale8 = 2*max_val_t / float(qmax - qmin)
         # # # TODO: ######### round 2^n #########
         def round_ln(x, type=None):
             if type == 'ceil':
@@ -99,10 +99,10 @@ class PtfObserver(BaseObserver):
         scale0 = scale1 / 2
         # TODO:
         # ############## asymmetric ################
-        # zero_point = qmin - torch.round(min_val_t / scale8)
-        # zero_point.clamp_(qmin, qmax)
+        zero_point = qmin - torch.round(min_val_t / scale8)
+        zero_point.clamp_(qmin, qmax)
         ################# symmetric #################
-        zero_point = torch.zeros_like(max_val.max(), dtype=torch.int64)
+        # zero_point = torch.zeros_like(max_val.max(), dtype=torch.int64)
         #############################################
 
         scale_mask = torch.ones_like(max_val)

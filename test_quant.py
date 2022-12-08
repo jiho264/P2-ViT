@@ -393,9 +393,12 @@ def validate(args, val_loader, model, criterion, device, bit_config=None):
     for i, (data, target) in enumerate(val_loader):
         data = data.to(device)
         target = target.to(device)
-
+        if i == 0:
+            plot_flag = True
+        else:
+            plot_flag = False
         with torch.no_grad():
-            output, FLOPs, distance = model(data, bit_config)
+            output, FLOPs, distance = model(data, bit_config, plot_flag)
         loss = criterion(output, target)
 
         # measure accuracy and record loss

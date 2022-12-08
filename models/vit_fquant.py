@@ -12,7 +12,7 @@ from itertools import repeat
 import torch
 import torch.nn.functional as F
 from torch import nn
-
+from .plot_distrib import plot_distribution
 from .layers_quant import DropPath, HybridEmbed, Mlp, PatchEmbed, trunc_normal_
 from .layers import Mlp_woq, PatchEmbed_woq
 from .ptq import QAct, QConv2d, QIntLayerNorm, QIntSoftmax, QLinear
@@ -94,7 +94,7 @@ class Attention(nn.Module):
             observer_str=cfg.OBSERVER_S,
             quantizer_str=cfg.QUANTIZER_S)
 
-    def forward(self, x, FLOPs, global_distance, atten_bit_config):
+    def forward(self, x, FLOPs, global_distance, atten_bit_config, plot=False, quant=False):
         # B, N, C = x[0].shape
         # x = self.qkv(x)
         # x = self.qact1(x)
@@ -128,6 +128,8 @@ class Attention(nn.Module):
         # x[0] = self.proj_drop(x[0])
         # x[1] = self.proj_drop(x[1])
         # return x
+        activation = []
+        activation.append(x)
         B, N, C = x.shape
         if atten_bit_config:
             bit_config = atten_bit_config[0]
@@ -138,6 +140,7 @@ class Attention(nn.Module):
         FLOPs.append(N*C*M)
         
         x = self.qact1(x)
+        activation.append(x)
         qkv = x.reshape(B, N, 3, self.num_heads,
                         C // self.num_heads).permute(2, 0, 3, 1, 4)  # (BN33)
         q, k, v = (
@@ -147,12 +150,14 @@ class Attention(nn.Module):
         )  # make torchscript happy (cannot use tensor as tuple)
         attn = (q @ k.transpose(-2, -1)) * self.scale
         attn = self.qact_attn1(attn)
+        activation.append(x)
         # TODO:
         attn = self.log_int_softmax(attn, self.qact_attn1.quantizer.scale)
         # attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
         x = self.qact2(x)
+        activation.append(x)
         
         B, N, C = x.shape
         if atten_bit_config:
@@ -164,6 +169,10 @@ class Attention(nn.Module):
         FLOPs.append(N*C*M)
         
         x = self.qact3(x)
+        activation.append(x)
+        if plot:
+            plot_distribution(activation, 'attn', quant)
+        # exit()
         x = self.proj_drop(x)
         return x
 
@@ -231,11 +240,13 @@ class Block(nn.Module):
                           observer_str=cfg.OBSERVER_A_LN,
                           quantizer_str=cfg.QUANTIZER_A_LN)
 
-    def forward(self, x, last_quantizer=None, FLOPs=[], global_distance=[], local_bit_config=None):
+    def forward(self, x, last_quantizer=None, FLOPs=[], global_distance=[], local_bit_config=None, plot=False, quant=False):
         # x = self.qact2(x + self.drop_path(
         #     self.attn(
         #         self.qact1(self.norm1(x, last_quantizer,
         #                               self.qact1.quantizer)))))
+        activation = []
+        activation.append(x)
         if local_bit_config:
             atten_bit_config = local_bit_config[0:2]
         else:
@@ -243,7 +254,8 @@ class Block(nn.Module):
         x = self.qact2(x + self.drop_path(
             self.attn(
                 self.qact1(self.norm1(x, last_quantizer,
-                                      self.qact1.quantizer)), FLOPs, global_distance, atten_bit_config)))
+                                      self.qact1.quantizer)), FLOPs, global_distance, atten_bit_config, plot, quant)))
+        activation.append(x)
         # x_old = copy.deepcopy(x)
         # x = self.attn(
         #         self.qact1(self.norm1(x, last_quantizer,
@@ -268,7 +280,11 @@ class Block(nn.Module):
             self.mlp(
                 self.qact3(
                     self.norm2(x, self.qact2.quantizer,
-                               self.qact3.quantizer)), FLOPs, global_distance, ffn_bit_config)))
+                               self.qact3.quantizer)), FLOPs, global_distance, ffn_bit_config, plot, quant)))
+        activation.append(x)
+        if plot:
+            plot_distribution(activation, 'block', quant)
+        # exit()
         # x_old = copy.deepcopy(x)
         # x = self.mlp(
         #         self.qact3(
@@ -318,6 +334,7 @@ class VisionTransformer(nn.Module):
         norm_layer = norm_layer or partial(nn.LayerNorm, eps=1e-6)
 
         self.cfg = cfg
+        self.quant = False
         self.input_quant = input_quant
         if input_quant:
             self.qact_input = QAct(quant=quant,
@@ -389,6 +406,7 @@ class VisionTransformer(nn.Module):
                   calibrate=calibrate,
                   cfg=cfg) for i in range(depth)
         ])
+        self.depth =depth
         self.norm = norm_layer(embed_dim)
         self.qact2 = QAct(quant=quant,
                           calibrate=calibrate,
@@ -451,6 +469,8 @@ class VisionTransformer(nn.Module):
                      if num_classes > 0 else nn.Identity())
 
     def model_quant(self, flag='on'):
+        if flag == 'on':
+            self.quant = True
         for m in self.modules():
             if type(m) in [QConv2d, QLinear, QAct, QIntSoftmax]:
                 m.quant = True
@@ -481,12 +501,13 @@ class VisionTransformer(nn.Module):
             if type(m) in [QConv2d, QLinear, QAct, QIntSoftmax]:
                 m.calibrate = False
 
-    def forward_features(self, x, FLOPs, global_distance, bit_config):
+    def forward_features(self, x, FLOPs, global_distance, bit_config, global_plot):
         # B = x[0].shape[0]
         B = x.shape[0]
-
+        activation = []
         if self.input_quant:
             x = self.qact_input(x)
+        activation.append(x)
             # print()
         # x_original = x
         if bit_config:
@@ -502,6 +523,7 @@ class VisionTransformer(nn.Module):
         # x[1] = torch.cat((cls_tokens, x[1]), dim=1)
         x = torch.cat((cls_tokens, x), dim=1)
         x = self.qact_embed(x)
+        activation.append(x)
         x = x + self.qact_pos(self.pos_embed)
         
         # out = self.qact_pos([self.pos_embed,self.pos_embed])
@@ -510,6 +532,7 @@ class VisionTransformer(nn.Module):
         # x[1] = x[1] + out[1]
 
         x = self.qact1(x)
+        activation.append(x)
 
         # x[0] = self.pos_drop(x[0])
         # x[1] = self.pos_drop(x[1])
@@ -522,25 +545,32 @@ class VisionTransformer(nn.Module):
                 local_bit_config = None
             last_quantizer = self.qact1.quantizer if i == 0 else self.blocks[
                 i - 1].qact4.quantizer
-            x = blk(x, last_quantizer, FLOPs, global_distance, local_bit_config)
-
+            if i == self.depth-1 and global_plot:
+                plot = True
+            else:
+                plot = False
+            x = blk(x, last_quantizer, FLOPs, global_distance, local_bit_config, plot, self.quant)
+        
         x = self.norm(x, self.blocks[-1].qact4.quantizer,
                       self.qact2.quantizer)[:, 0]
         # x[0] = x[0][:, 0]
         # x[1] = x[1][:, 0]
 
         x = self.qact2(x)
+        # activation.append(x)
+        # plot_distribution(activation, 'vit', self.quant)
         # x[0] = self.pre_logits(x[0])
         # x[1] = self.pre_logits(x[1])
         x = self.pre_logits(x)
+        # exit()
         return x
 
-    def forward(self, x, bit_config=None):
+    def forward(self, x, bit_config=None, plot=True):
         # new_x = [x, x]
         # new_x = x
         FLOPs = []
         global_distance = []
-        x = self.forward_features(x, FLOPs, global_distance, bit_config)
+        x = self.forward_features(x, FLOPs, global_distance, bit_config, plot)
         
         B, C = x.shape
         if bit_config:

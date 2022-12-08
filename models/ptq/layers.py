@@ -55,6 +55,8 @@ class QConv2d(nn.Conv2d):
 
         if self.calibrate:
             for bit_type in BIT_TYPE_LIST:
+                if bit_type == BIT_TYPE_DICT['uint8']:
+                    continue
                 # FIXME:
                 self.quantizer.bit_type = bit_type
                 self.observer.bit_type = bit_type

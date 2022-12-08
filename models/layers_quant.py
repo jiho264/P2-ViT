@@ -7,7 +7,7 @@ from itertools import repeat
 import torch
 import torch.nn.functional as F
 from torch import nn
-
+from .plot_distrib import plot_distribution
 from .ptq import QAct, QConv2d, QLinear
 
 
@@ -161,7 +161,7 @@ class Mlp(nn.Module):
                           quantizer_str=cfg.QUANTIZER_A)
         self.drop = nn.Dropout(drop)
 
-    def forward(self, x, FLOPs, global_distance, ffn_bit_config):
+    def forward(self, x, FLOPs, global_distance, ffn_bit_config, plot=False, quant=False):
         # x = self.fc1(x)
         # x[0] = self.act(x[0])
         # x[1] = self.act(x[1])
@@ -173,6 +173,8 @@ class Mlp(nn.Module):
         # x[0] = self.drop(x[0])
         # x[1] = self.drop(x[1])
         B, N, C = x.shape
+        activation = []
+        activation.append(x)
         if ffn_bit_config:
             bit_config = ffn_bit_config[0]
         else:
@@ -184,6 +186,7 @@ class Mlp(nn.Module):
         x = self.act(x)
         # TODO:
         x = self.qact1(x, asymmetric=True)
+        activation.append(x)
         x = self.drop(x)
         
         B, N, C = x.shape
@@ -196,6 +199,9 @@ class Mlp(nn.Module):
         FLOPs.append(N*C*M)
         
         x = self.qact2(x)
+        activation.append(x)
+        if plot:
+            plot_distribution(activation, 'MLP', quant)
         x = self.drop(x)
         return x
 
