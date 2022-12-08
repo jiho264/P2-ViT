@@ -95,11 +95,12 @@ class MinmaxObserver(BaseObserver):
                     return F.linear(input_gt, weight, bias)
                     # return weight 
 
-        def round_x(scale, x, zero_point=0):
+        def round_x(scale, x, zero_point=False):
             alpha_round = round_ln(scale, 'round').cuda()
             alpha_floor = round_ln(scale, 'floor').cuda()
             alpha = alpha_round
-            zero_point = torch.Tensor([zero_point]).cuda()
+            if not zero_point:
+                zero_point = torch.Tensor([0]).cuda()
             # print(scale.shape)
             if self.calibration_mode == 'layer_wise':
                 dim = 1
@@ -153,11 +154,11 @@ class MinmaxObserver(BaseObserver):
         else:
             # zero_point = torch.zeros_like(max_val, dtype=torch.int64)
             scale = (max_val - min_val) / float(qmax - qmin)
+            zero_point = qmin - torch.round(min_val / scale)
+            zero_point.clamp_(qmin, qmax)
             # TODO: ########### 2^n ############
-            alpha_x = round_x(scale, self.v)
+            alpha_x = round_x(scale, self.v, zero_point)
             scale = 2**alpha_x
             ####################################
             scale.clamp_(self.eps)
-            zero_point = qmin - torch.round(min_val / scale)
-            zero_point.clamp_(qmin, qmax)
         return scale, zero_point

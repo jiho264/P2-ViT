@@ -144,6 +144,8 @@ class QLinear(nn.Linear):
             # if self.last_calibrate: 
             distance = []
             for bit_type in BIT_TYPE_LIST:
+                if bit_type == BIT_TYPE_DICT['uint8']:
+                    continue
                 # FIXME:
                 self.quantizer.bit_type = bit_type
                 self.observer.bit_type = bit_type
