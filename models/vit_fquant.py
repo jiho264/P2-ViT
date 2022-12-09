@@ -565,7 +565,7 @@ class VisionTransformer(nn.Module):
         # exit()
         return x
 
-    def forward(self, x, bit_config=None, plot=True):
+    def forward(self, x, bit_config=None, plot=False):
         # new_x = [x, x]
         # new_x = x
         FLOPs = []

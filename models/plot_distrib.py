@@ -62,7 +62,7 @@ def sub_plot_distribution(x, ax, j):
     ax.set_xlabel(label)
 
 def plot_distribution(a, name, quant):
-    fig, ax = plt.subplots(2, len(a),figsize=(6*len(a), 10))
+    fig, ax = plt.subplots(2, len(a),figsize=(3*len(a), 6))
     print("Ploting......")
     # fig = plt.figure(figsize=(10, 25))
     # gs = gridspec.GridSpec(1,4)
@@ -71,6 +71,7 @@ def plot_distribution(a, name, quant):
         # ax = fig.add_subplot(gs[i], projection='3d')
             sub_plot_distribution(a[i], ax[j][i], j)
     if quant:
-        name += "_quant"
+        # TODO:
+        name += "_aa2n_ln_quant"
     plt.savefig("figs/" + name + ".pdf")
 

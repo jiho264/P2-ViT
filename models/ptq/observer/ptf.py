@@ -60,11 +60,12 @@ class PtfObserver(BaseObserver):
                 out = torch.gt((x-2**y),(2**(y+1)-x))
                 return out+y
 
-        def round_x(scale, zero_point=0):
+        def round_x(scale, zero_point=False):
             alpha_round = round_ln(scale, 'round')
             alpha_floor = round_ln(scale, 'floor')
             alpha = alpha_round
-            zero_point = torch.Tensor([zero_point]).cuda()
+            if not zero_point:
+                zero_point = torch.Tensor([0]).cuda()
             # print(scale.shape)
             dim = 1
             for j in range(dim):
@@ -89,7 +90,7 @@ class PtfObserver(BaseObserver):
             return alpha
         # FIXME:
         alpha_ceil = round_ln(scale8, 'ceil')
-        alpha_x = round_x(scale8)
+        # alpha_x = round_x(scale8)
         scale8 = 2**alpha_ceil
         #############################################
         scale8.clamp_(self.eps)
