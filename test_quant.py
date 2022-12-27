@@ -238,7 +238,7 @@ def main():
                 #     output = model(image)
                 # model.model_quant(flag='off')
                 model.model_open_last_calibrate()
-                output, FLOPs, global_distance = model(image_list[0])
+                output, FLOPs, global_distance = model(image_list[0], plot=False)
 
         model.model_close_calibrate()
         model.model_quant()
@@ -394,7 +394,7 @@ def validate(args, val_loader, model, criterion, device, bit_config=None):
         data = data.to(device)
         target = target.to(device)
         if i == 0:
-            plot_flag = True
+            plot_flag = False
         else:
             plot_flag = False
         with torch.no_grad():
@@ -411,19 +411,19 @@ def validate(args, val_loader, model, criterion, device, bit_config=None):
         batch_time.update(time.time() - end)
         end = time.time()
 
-        # if i % args.print_freq == 0:
-        #     print('Test: [{0}/{1}]\t'
-        #           'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-        #           'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-        #           'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-        #           'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-        #               i,
-        #               len(val_loader),
-        #               batch_time=batch_time,
-        #               loss=losses,
-        #               top1=top1,
-        #               top5=top5,
-        #           ))
+        if i % args.print_freq == 0:
+            print('Test: [{0}/{1}]\t'
+                  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                  'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                  'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
+                      i,
+                      len(val_loader),
+                      batch_time=batch_time,
+                      loss=losses,
+                      top1=top1,
+                      top5=top5,
+                  ))
     val_end_time = time.time()
     print(' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f} Time {time:.3f}'.
           format(top1=top1, top5=top5, time=val_end_time - val_start_time))

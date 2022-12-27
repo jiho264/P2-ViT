@@ -17,12 +17,39 @@ from .layers_quant import DropPath, HybridEmbed, Mlp, PatchEmbed, trunc_normal_
 from .layers import Mlp_woq, PatchEmbed_woq
 from .ptq import QAct, QConv2d, QIntLayerNorm, QIntSoftmax, QLinear
 from .utils import load_weights_from_npz
+# from .ptq.bit_type import BIT_TYPE_DICT, BIT_TYPE_LIST
 
 __all__ = [
     'deit_tiny_patch16_224', 'deit_small_patch16_224', 'deit_base_patch16_224',
     'vit_base_patch16_224', 'vit_large_patch16_224'
 ]
 
+# alpha_pool = [0.35,0.4,0.5]
+# deit_small_4: 0.35 
+alpha_pool = [0.5] 
+bit_pool = [4,8]
+
+
+def smoothquant_process(weight, act, alpha):
+    def round_ln(x, type=None):
+        if type == 'ceil':
+            return torch.ceil(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
+        elif type == 'floor':
+            return torch.floor(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
+        else:
+            y = torch.floor(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
+            out = torch.gt((x-2**y),(2**(y+1)-x))
+            return out+y
+    c_out, c_in = weight.shape
+    B, token, c_in = act.shape
+    # channel-wise scaling factors
+    local_max_x = torch.abs(act).max(axis=1).values
+    global_max_x = local_max_x.max(axis=0).values
+    max_weight = torch.abs(weight).max(axis=0).values
+    channel_scale = (global_max_x*alpha)/(max_weight**(1-alpha))
+    aplha = round_ln(channel_scale, 'round')
+    channel_scale = 2**aplha
+    return channel_scale
 
 class Attention(nn.Module):
 
@@ -50,7 +77,19 @@ class Attention(nn.Module):
                            bit_type=cfg.BIT_TYPE_W,
                            calibration_mode=cfg.CALIBRATION_MODE_W,
                            observer_str=cfg.OBSERVER_W,
-                           quantizer_str=cfg.QUANTIZER_W)                 
+                           quantizer_str=cfg.QUANTIZER_W)  
+        # self.qacts = QAct(quant=quant,
+        #                   calibrate=calibrate,
+        #                   bit_type=cfg.BIT_TYPE_A,
+        #                   calibration_mode=cfg.CALIBRATION_MODE_A_LN,
+        #                   observer_str=cfg.OBSERVER_A_LN,
+        #                   quantizer_str=cfg.QUANTIZER_A_LN)  
+        self.qact0 = QAct(quant=quant,
+                          calibrate=calibrate,
+                          bit_type=cfg.BIT_TYPE_A,
+                          calibration_mode=cfg.CALIBRATION_MODE_A,
+                          observer_str=cfg.OBSERVER_A,
+                          quantizer_str=cfg.QUANTIZER_A)               
         self.qact1 = QAct(quant=quant,
                           calibrate=calibrate,
                           bit_type=cfg.BIT_TYPE_A,
@@ -74,9 +113,15 @@ class Attention(nn.Module):
         self.qact3 = QAct(quant=quant,
                           calibrate=calibrate,
                           bit_type=cfg.BIT_TYPE_A,
-                          calibration_mode=cfg.CALIBRATION_MODE_A,
-                          observer_str=cfg.OBSERVER_A,
-                          quantizer_str=cfg.QUANTIZER_A)
+                          calibration_mode=cfg.CALIBRATION_MODE_A_LN,
+                          observer_str=cfg.OBSERVER_A_LN,
+                          quantizer_str=cfg.QUANTIZER_A_LN)
+        # self.qact3 = QAct(quant=quant,
+        #                   calibrate=calibrate,
+        #                   bit_type=cfg.BIT_TYPE_A,
+        #                   calibration_mode=cfg.CALIBRATION_MODE_A,
+        #                   observer_str=cfg.OBSERVER_A,
+        #                   quantizer_str=cfg.QUANTIZER_A)
         self.qact_attn1 = QAct(quant=quant,
                                calibrate=calibrate,
                                bit_type=cfg.BIT_TYPE_A,
@@ -93,8 +138,9 @@ class Attention(nn.Module):
             calibration_mode=cfg.CALIBRATION_MODE_S,
             observer_str=cfg.OBSERVER_S,
             quantizer_str=cfg.QUANTIZER_S)
+        self.channel_scale = None
 
-    def forward(self, x, FLOPs, global_distance, atten_bit_config, plot=False, quant=False):
+    def forward(self, x, FLOPs, global_distance, atten_bit_config, plot=False, quant=False, smoothquant=True):
         # B, N, C = x[0].shape
         # x = self.qkv(x)
         # x = self.qact1(x)
@@ -128,18 +174,124 @@ class Attention(nn.Module):
         # x[0] = self.proj_drop(x[0])
         # x[1] = self.proj_drop(x[1])
         # return x
+
         activation = []
-        activation.append(x)
         B, N, C = x.shape
         if atten_bit_config:
             bit_config = atten_bit_config[0]
         else:
             bit_config = None
-        x = self.qkv(x, global_distance, bit_config)
+        
+        # FIXME: smoothquant
+        # out = self.qacts(x)
+        if smoothquant:
+            if self.channel_scale == None:
+                def round_ln(x, type=None):
+                    if type == 'ceil':
+                        return torch.ceil(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
+                    elif type == 'floor':
+                        return torch.floor(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
+                    else:
+                        y = torch.floor(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
+                        out = torch.gt((x-2**y),(2**(y+1)-x))
+                        return out+y
+
+                c_out, c_in = self.qkv.weight.shape
+                B, token, c_in = x.shape
+                # # scale_factor_v1 = smoothquant_process(self.qkv.weight, x, 0.5)
+                local_max_x = torch.abs(x).max(axis=1).values
+                global_max_x = local_max_x.max(axis=0).values
+                max_weight = torch.abs(self.qkv.weight).max(axis=0).values
+                # scale_factor_v1 = (global_max_x**0.5)/(max_weight**0.5)
+                # aplha = round_ln(scale_factor_v1, 'round')
+                # scale_factor_v1 = 2**aplha
+                # x_smoothed_v1 = x/scale_factor_v1.reshape((1,1,-1))
+                # weight_smoothed_v1 = self.qkv.weight*scale_factor_v1.reshape((1,-1))
+        # else:
+        #     x_smoothed = x
+        #     weight_smoothed = None
+        
+        # #######################################################
+                # channel-wise scaling factors
+                # local_max_x = torch.abs(x).max(axis=1).values
+                # global_max_x = local_max_x.max(axis=0).values
+                # max_weight = torch.abs(self.qkv.weight).max(axis=0).values
+                channel_scale_pool = []
+                self.best_scale = []
+                # gt = F.linear(x, self.qkv.weight, self.qkv.bias)
+                loss_pool = [[],[]]
+                act_scale = []
+                act_zp = []
+                weight_scale = []
+                weight_zp = []
+                self.best_act_scale = []
+                self.best_act_zp = []
+                self.best_weight_scale = []
+                self.best_weight_zp = []
+                for i, alpha in enumerate(alpha_pool):
+                    channel_scale = global_max_x**alpha/(max_weight**(1-alpha))
+                    aplha = round_ln(channel_scale, 'round')
+                    channel_scale = 2**aplha
+                    channel_scale_pool.append(channel_scale)
+                    x_smoothed = x/channel_scale.reshape((1,1,-1))
+                    weight_smoothed = self.qkv.weight*channel_scale.reshape((1,-1))
+                    gt = F.linear(x_smoothed, weight_smoothed, self.qkv.bias)
+                    
+                    # observe to obtaion scaling factors
+                    middle_out = self.qact0(x_smoothed)
+                    act_scale.append(self.qact0.quantizer.scale)
+                    act_zp.append(self.qact0.quantizer.zero_point)
+                    middle_out = self.qkv(middle_out, global_distance, bit_config, weight_smoothed, attn=False, attn_para=[self.num_heads, C, self.scale])
+                    weight_scale.append(self.qkv.quantizer.dic_scale)
+                    weight_zp.append(self.qkv.quantizer.dic_zero_point)
+                    # compute loss
+                    self.qact0.calibrate = False
+                    self.qact0.quant = True
+                    middle_out = self.qact0(x_smoothed)
+                    self.qkv.calibrate = False
+                    self.qkv.quant = True
+                    for j, bit in enumerate(bit_pool):
+                        quant_out = self.qkv(middle_out, global_distance, bit, weight_smoothed, attn=False, attn_para=[self.num_heads, C, self.scale])
+                        loss_pool[j].append((gt - quant_out).abs().pow(2.0).mean())
+                    self.qact0.quant = False
+                    self.qact0.calibrate = True
+                    self.qkv.quant = False
+                    self.qkv.calibrate = True
+                for loss in loss_pool:
+                    indx = loss.index(min(loss))
+                    self.channel_scale = channel_scale_pool[indx]
+                    self.best_scale.append(channel_scale_pool[indx])
+                    self.best_act_scale.append(act_scale[indx])
+                    self.best_act_zp.append(act_zp[indx])
+                    self.best_weight_scale.append(weight_scale[indx])
+                    self.best_weight_zp.append(weight_zp[indx])            
+
+                x = gt
+            else:
+                indx = bit_pool.index(bit_config)
+                self.channel_scale = self.best_scale[indx]    
+                x_smoothed = x/self.channel_scale.reshape((1,1,-1))
+                weight_smoothed = self.qkv.weight*self.channel_scale.reshape((1,-1))
+
+                self.qact0.quantizer.scale = self.best_act_scale[indx] 
+                self.qact0.quantizer.zero_point = self.best_act_zp[indx] 
+                x = self.qact0(x_smoothed)
+                activation.append(x)
+                self.qkv.quantizer.dic_scale = self.best_weight_scale[indx] 
+                self.qkv.quantizer.dic_zero_point = self.best_weight_zp[indx] 
+                x = self.qkv(x, global_distance, bit_config, weight_smoothed, attn=False, attn_para=[self.num_heads, C, self.scale])
+        else:
+            x_smoothed = x
+            weight_smoothed = None
+            x = self.qact0(x_smoothed)
+            activation.append(x)
+            x = self.qkv(x, global_distance, bit_config, weight_smoothed, attn=False, attn_para=[self.num_heads, C, self.scale])
+           
+        
         B, N, M = x.shape
         FLOPs.append(N*C*M)
-        
-        x = self.qact1(x)
+        # TODO:
+        x = self.qact1(x, attn=False, attn_para=[self.num_heads, C, self.scale])
         activation.append(x)
         qkv = x.reshape(B, N, 3, self.num_heads,
                         C // self.num_heads).permute(2, 0, 3, 1, 4)  # (BN33)
@@ -196,12 +348,12 @@ class Block(nn.Module):
                  cfg=None):
         super().__init__()
         self.norm1 = norm_layer(dim)
-        self.qact1 = QAct(quant=quant,
-                          calibrate=calibrate,
-                          bit_type=cfg.BIT_TYPE_A,
-                          calibration_mode=cfg.CALIBRATION_MODE_A,
-                          observer_str=cfg.OBSERVER_A,
-                          quantizer_str=cfg.QUANTIZER_A)
+        # self.qact1 = QAct(quant=quant,
+        #                   calibrate=calibrate,
+        #                   bit_type=cfg.BIT_TYPE_A,
+        #                   calibration_mode=cfg.CALIBRATION_MODE_A,
+        #                   observer_str=cfg.OBSERVER_A,
+        #                   quantizer_str=cfg.QUANTIZER_A)
         self.attn = Attention(dim,
                               num_heads=num_heads,
                               qkv_bias=qkv_bias,
@@ -219,12 +371,12 @@ class Block(nn.Module):
                           observer_str=cfg.OBSERVER_A_LN,
                           quantizer_str=cfg.QUANTIZER_A_LN)
         self.norm2 = norm_layer(dim)
-        self.qact3 = QAct(quant=quant,
-                          calibrate=calibrate,
-                          bit_type=cfg.BIT_TYPE_A,
-                          calibration_mode=cfg.CALIBRATION_MODE_A,
-                          observer_str=cfg.OBSERVER_A,
-                          quantizer_str=cfg.QUANTIZER_A)
+        # self.qact3 = QAct(quant=quant,
+        #                   calibrate=calibrate,
+        #                   bit_type=cfg.BIT_TYPE_A,
+        #                   calibration_mode=cfg.CALIBRATION_MODE_A,
+        #                   observer_str=cfg.OBSERVER_A,
+        #                   quantizer_str=cfg.QUANTIZER_A)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim,
                        hidden_features=mlp_hidden_dim,
@@ -251,10 +403,14 @@ class Block(nn.Module):
             atten_bit_config = local_bit_config[0:2]
         else:
             atten_bit_config = None
+        # x = self.qact2(x + self.drop_path(
+        #     self.attn(
+        #         self.qact1(self.norm1(x, last_quantizer,
+        #                               self.qact1.quantizer)), FLOPs, global_distance, atten_bit_config, plot, quant)))
         x = self.qact2(x + self.drop_path(
             self.attn(
-                self.qact1(self.norm1(x, last_quantizer,
-                                      self.qact1.quantizer)), FLOPs, global_distance, atten_bit_config, plot, quant)))
+                (self.norm1(x, last_quantizer,
+                                      self.attn.qact0.quantizer, self.attn.channel_scale)), FLOPs, global_distance, atten_bit_config, plot, quant)))
         activation.append(x)
         # x_old = copy.deepcopy(x)
         # x = self.attn(
@@ -276,11 +432,15 @@ class Block(nn.Module):
             ffn_bit_config = local_bit_config[2:4]
         else:
             ffn_bit_config = None
+        # x = self.qact4(x + self.drop_path(
+        #     self.mlp(
+        #         self.qact3(
+        #             self.norm2(x, self.qact2.quantizer,
+        #                        self.qact3.quantizer)), FLOPs, global_distance, ffn_bit_config, plot, quant)))
         x = self.qact4(x + self.drop_path(
             self.mlp(
-                self.qact3(
                     self.norm2(x, self.qact2.quantizer,
-                               self.qact3.quantizer)), FLOPs, global_distance, ffn_bit_config, plot, quant)))
+                               self.mlp.qact0.quantizer, self.attn.channel_scale), FLOPs, global_distance, ffn_bit_config, plot, quant)))
         activation.append(x)
         if plot:
             plot_distribution(activation, 'block', quant)

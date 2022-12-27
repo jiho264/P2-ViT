@@ -106,7 +106,7 @@ class PtfObserver(BaseObserver):
         zero_point = torch.zeros_like(max_val.max(), dtype=torch.int64)
         #############################################
 
-        scale_mask = torch.ones_like(max_val)
+        self.scale_mask = torch.ones_like(max_val)
         for j in range(inputs.shape[2]):
             # FIXME:
             data = inputs[..., j].unsqueeze(-1)
@@ -128,8 +128,8 @@ class PtfObserver(BaseObserver):
             score8 = lp_loss(data_gt, data_q8, p=2.0, reduction='all')
             score = [score0, score1, score2, score4, score8]
             # score = [score1, score2, score4, score8]
-            scale_mask[j] *= 2**score.index(min(score))
+            self.scale_mask[j] *= 2**score.index(min(score))
         # TODO:
-        scale = scale0 * scale_mask
+        scale = scale0 * self.scale_mask
         return scale, zero_point
 

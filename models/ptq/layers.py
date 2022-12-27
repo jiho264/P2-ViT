@@ -129,7 +129,7 @@ class QLinear(nn.Linear):
         self.quantizer = build_quantizer(self.quantizer_str, self.bit_type,
                                          self.observer, self.module_type)
 
-    def forward(self, x, global_distance=[], bit_config=None):
+    def forward(self, x, global_distance=[], bit_config=None, weight_smoothed=None, attn=False, attn_para=None):
         # if self.calibrate:
         #     self.quantizer.observer.update(self.weight)
         #     if self.last_calibrate:
@@ -138,8 +138,12 @@ class QLinear(nn.Linear):
         #     return F.linear(x, self.weight, self.bias)
         # weight = self.quantizer(self.weight)
         # return F.linear(x, weight, self.bias)
+        if weight_smoothed==None:
+            weight_smoothed = self.weight
         if not self.quant:
-            y = F.linear(x, self.weight, self.bias)
+            # y = F.linear(x, self.weight, self.bias)
+            y = F.linear(x, weight_smoothed, self.bias)
+
         if self.calibrate:
             # if self.last_calibrate: 
             distance = []
@@ -155,35 +159,21 @@ class QLinear(nn.Linear):
                 else: 
                     self.observer.calibration_mode = 'channel_wise'
                 
-                self.quantizer.observer.update(self.weight)
-                self.quantizer.update_quantization_params(x, others=[self.bias])
-                weight = self.quantizer(self.weight)
+                self.quantizer.observer.update(weight_smoothed)
+                self.quantizer.update_quantization_params(x, others=[self.bias], attn=attn, attn_para=attn_para)
+                weight = self.quantizer(weight_smoothed)
                 # y_q = F.linear(x, weight, self.bias)
                 # TODO:
                 # distance.append(utils.lp_loss(y, y_q, p=2.0, reduction='all'))
-                distance.append(utils.lp_loss(self.weight, weight, p=2.0, reduction='all'))
+                distance.append(utils.lp_loss(weight_smoothed, weight, p=2.0, reduction='all'))
             global_distance.append(distance)
         if not self.quant:
             return y
         if bit_config:
-            # if bit_config == 4:
-            #     self.quantizer.bit_type = BIT_TYPE_DICT['int4']
-            #     self.observer.bit_type = BIT_TYPE_DICT['int4']
-            # elif bit_config == 6:
-            #     self.quantizer.bit_type = BIT_TYPE_DICT['int6']
-            #     self.observer.bit_type = BIT_TYPE_DICT['int6']
-            # elif bit_config == 8:
-            #     self.quantizer.bit_type = BIT_TYPE_DICT['int8']
-            #     self.observer.bit_type = BIT_TYPE_DICT['int8']
-            # elif bit_config == 10:
-            #     self.quantizer.bit_type = BIT_TYPE_DICT['int10']
-            #     self.observer.bit_type = BIT_TYPE_DICT['int10']
-            # else:
-            #     assert bit_config==4 or bit_config == 6 or bit_config==8
             bit_type = 'int' + str(bit_config)
             self.quantizer.bit_type = BIT_TYPE_DICT[bit_type]
             self.observer.bit_type = BIT_TYPE_DICT[bit_type]
-        weight = self.quantizer(self.weight)
+        weight = self.quantizer(weight_smoothed)
         return F.linear(x, weight, self.bias)
 
 
@@ -213,12 +203,16 @@ class QAct(nn.Module):
         self.quantizer = build_quantizer(self.quantizer_str, self.bit_type,
                                          self.observer, self.module_type)
 
-    def forward(self, x, asymmetric=False):
-        if self.calibrate:
+    def forward(self, x, asymmetric=False, attn=False, attn_para=None):
+        if self.calibrate: 
+            if asymmetric:
+                self.quantizer.bit_type = BIT_TYPE_DICT['uint8']
+                self.observer.bit_type = BIT_TYPE_DICT['uint8']
+                self.observer.symmetric = False
             self.quantizer.observer.update(x)
             if self.last_calibrate:
                 # import ipdb;ipdb.set_trace()
-                self.quantizer.update_quantization_params(x, asymmetric=asymmetric)
+                self.quantizer.update_quantization_params(x, attn=attn, attn_para=attn_para)
         if not self.quant:
             return x
         x = self.quantizer(x)
@@ -246,6 +240,7 @@ class QIntLayerNorm(nn.LayerNorm):
                 x,
                 in_quantizer=None,
                 out_quantizer=None,
+                out_quantizer_scale=None,
                 in_scale_expand=1):
         
         # y = F.layer_norm(x[0], self.normalized_shape, self.weight, self.bias,
@@ -261,10 +256,14 @@ class QIntLayerNorm(nn.LayerNorm):
             if in_scale_expand != 1:
                 in_scale = in_scale.unsqueeze(-1).expand(
                     -1, in_scale_expand).T.reshape(-1)
-            out_scale = out_quantizer.scale
-            assert in_scale is not None and out_scale is not None
+            out_scale_global = out_quantizer.scale
+            assert in_scale is not None and out_scale_global is not None
             channel_nums = x.shape[-1]
             in_scale = in_scale.reshape(1, 1, -1)
+            if out_quantizer_scale != None:
+                out_scale = out_scale_global*out_quantizer_scale 
+            else:
+                out_scale = out_scale_global
             out_scale = out_scale.reshape(1, 1, -1)
             x_q = (x / in_scale).round()
             in_scale1 = in_scale.min()

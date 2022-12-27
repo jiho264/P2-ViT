@@ -10,6 +10,30 @@ from torch import nn
 from .plot_distrib import plot_distribution
 from .ptq import QAct, QConv2d, QLinear
 
+# alpha_pool = [0.35,0.4,0.5,0.55]
+alpha_pool = [0.5]
+bit_pool = [4,8]
+
+def smoothquant_process(weight, act, ):
+    def round_ln(x, type=None):
+        if type == 'ceil':
+            return torch.ceil(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
+        elif type == 'floor':
+            return torch.floor(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
+        else:
+            y = torch.floor(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
+            out = torch.gt((x-2**y),(2**(y+1)-x))
+            return out+y
+    c_out, c_in = weight.shape
+    B, token, c_in = act.shape
+    # channel-wise scaling factors
+    local_max_x = torch.abs(act).max(axis=1).values
+    global_max_x = local_max_x.max(axis=0).values
+    max_weight = torch.abs(weight).max(axis=0).values
+    channel_scale = (global_max_x**0.5)/(max_weight**0.5)
+    aplha = round_ln(channel_scale, 'round')
+    channel_scale = 2**aplha
+    return channel_scale
 
 def _ntuple(n):
 
@@ -129,6 +153,12 @@ class Mlp(nn.Module):
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
         # self.fc1 = nn.Linear(in_features, hidden_features)
+        self.qact0 = QAct(quant=quant,
+                          calibrate=calibrate,
+                          bit_type=cfg.BIT_TYPE_A,
+                          calibration_mode=cfg.CALIBRATION_MODE_A,
+                          observer_str=cfg.OBSERVER_A,
+                          quantizer_str=cfg.QUANTIZER_A)
         self.fc1 = QLinear(in_features,
                            hidden_features,
                            quant=quant,
@@ -156,12 +186,19 @@ class Mlp(nn.Module):
         self.qact2 = QAct(quant=quant,
                           calibrate=calibrate,
                           bit_type=cfg.BIT_TYPE_A,
-                          calibration_mode=cfg.CALIBRATION_MODE_A,
-                          observer_str=cfg.OBSERVER_A,
-                          quantizer_str=cfg.QUANTIZER_A)
+                          calibration_mode=cfg.CALIBRATION_MODE_A_LN,
+                          observer_str=cfg.OBSERVER_A_LN,
+                          quantizer_str=cfg.QUANTIZER_A_LN)
+        # self.qact2 = QAct(quant=quant,
+        #                   calibrate=calibrate,
+        #                   bit_type=cfg.BIT_TYPE_A,
+        #                   calibration_mode=cfg.CALIBRATION_MODE_A,
+        #                   observer_str=cfg.OBSERVER_A,
+        #                   quantizer_str=cfg.QUANTIZER_A)
         self.drop = nn.Dropout(drop)
+        self.channel_scale = None
 
-    def forward(self, x, FLOPs, global_distance, ffn_bit_config, plot=False, quant=False):
+    def forward(self, x, FLOPs, global_distance, ffn_bit_config, plot=False, quant=False, smoothquant=True):
         # x = self.fc1(x)
         # x[0] = self.act(x[0])
         # x[1] = self.act(x[1])
@@ -174,18 +211,118 @@ class Mlp(nn.Module):
         # x[1] = self.drop(x[1])
         B, N, C = x.shape
         activation = []
-        activation.append(x)
         if ffn_bit_config:
             bit_config = ffn_bit_config[0]
         else:
             bit_config = None
-        x = self.fc1(x, global_distance, bit_config)
+        
+        # FIXME: smoothquant
+        if smoothquant:
+            if self.channel_scale == None:
+                def round_ln(x, type=None):
+                    if type == 'ceil':
+                        return torch.ceil(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
+                    elif type == 'floor':
+                        return torch.floor(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
+                    else:
+                        y = torch.floor(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
+                        out = torch.gt((x-2**y),(2**(y+1)-x))
+                        return out+y
+                c_out, c_in = self.fc1.weight.shape
+                B, token, c_in = x.shape
+                # channel-wise scaling factors
+                local_max_x = torch.abs(x).max(axis=1).values
+                global_max_x = local_max_x.max(axis=0).values
+                max_weight = torch.abs(self.fc1.weight).max(axis=0).values
+        #         self.channel_scale = (global_max_x**0.5)/(max_weight**0.5)
+        #         aplha = round_ln(self.channel_scale, 'round')
+        #         self.channel_scale = 2**aplha
+        #     x_smoothed = x/self.channel_scale.reshape((1,1,-1))
+        #     weight_smoothed = self.fc1.weight*self.channel_scale.reshape((1,-1))
+        # else:
+        #     x_smoothed = x
+        #     weight_smoothed = None
+        # x = self.qact0(x_smoothed)
+        # activation.append(x)
+        # x = self.fc1(x, global_distance, bit_config, weight_smoothed)
+                channel_scale_pool = []
+                self.best_scale = []
+                # gt = F.linear(x, self.qkv.weight, self.qkv.bias)
+                loss_pool = [[],[]]
+                act_scale = []
+                act_zp = []
+                weight_scale = []
+                weight_zp = []
+                self.best_act_scale = []
+                self.best_act_zp = []
+                self.best_weight_scale = []
+                self.best_weight_zp = []
+                for i, alpha in enumerate(alpha_pool):
+                    channel_scale = global_max_x**alpha/(max_weight**(1-alpha))
+                    aplha = round_ln(channel_scale, 'round')
+                    channel_scale = 2**aplha
+                    channel_scale_pool.append(channel_scale)
+                    x_smoothed = x/channel_scale.reshape((1,1,-1))
+                    weight_smoothed = self.fc1.weight*channel_scale.reshape((1,-1))
+                    gt = F.linear(x_smoothed, weight_smoothed, self.fc1.bias)
+                    
+                    # observe to obtaion scaling factors
+                    middle_out = self.qact0(x_smoothed)
+                    act_scale.append(self.qact0.quantizer.scale)
+                    act_zp.append(self.qact0.quantizer.zero_point)
+                    middle_out = self.fc1(middle_out, global_distance, bit_config, weight_smoothed)
+                    weight_scale.append(self.fc1.quantizer.dic_scale)
+                    weight_zp.append(self.fc1.quantizer.dic_zero_point)
+                    # compute loss
+                    self.qact0.calibrate = False
+                    self.qact0.quant = True
+                    middle_out = self.qact0(x_smoothed)
+                    self.fc1.calibrate = False
+                    self.fc1.quant = True
+                    for j, bit in enumerate(bit_pool):
+                        quant_out = self.fc1(middle_out, global_distance, bit, weight_smoothed)
+                        loss_pool[j].append((gt - quant_out).abs().pow(2.0).mean())
+                    self.qact0.quant = False
+                    self.qact0.calibrate = True
+                    self.fc1.quant = False
+                    self.fc1.calibrate = True
+                for loss in loss_pool:
+                    indx = loss.index(min(loss))
+                    self.channel_scale = channel_scale_pool[indx]
+                    self.best_scale.append(channel_scale_pool[indx])
+                    self.best_act_scale.append(act_scale[indx])
+                    self.best_act_zp.append(act_zp[indx])
+                    self.best_weight_scale.append(weight_scale[indx])
+                    self.best_weight_zp.append(weight_zp[indx])            
+
+                x = gt
+            else:
+                indx = bit_pool.index(bit_config)
+                self.channel_scale = self.best_scale[indx]    
+                x_smoothed = x/self.channel_scale.reshape((1,1,-1))
+                weight_smoothed = self.fc1.weight*self.channel_scale.reshape((1,-1))
+
+                self.qact0.quantizer.scale = self.best_act_scale[indx] 
+                self.qact0.quantizer.zero_point = self.best_act_zp[indx] 
+                x = self.qact0(x_smoothed)
+                activation.append(x)
+                self.fc1.quantizer.dic_scale = self.best_weight_scale[indx] 
+                self.fc1.quantizer.dic_zero_point = self.best_weight_zp[indx] 
+                x = self.fc1(x, global_distance, bit_config, weight_smoothed)
+        else:
+            x_smoothed = x
+            weight_smoothed = None
+            x = self.qact0(x_smoothed)
+            activation.append(x)
+            x = self.fc1(x, global_distance, bit_config, weight_smoothed)
+
+
         B, N, M = x.shape
         FLOPs.append(N*C*M)
         
         x = self.act(x)
         # TODO:
-        x = self.qact1(x, asymmetric=True)
+        x = self.qact1(x, asymmetric=False)
         activation.append(x)
         x = self.drop(x)
         

@@ -126,3 +126,4 @@ pretrained_ckpt/
 logs/
 pretrained_model/
 figs/
+test.sh
