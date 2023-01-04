@@ -25,7 +25,10 @@ __all__ = [
 ]
 
 # alpha_pool = [0.35,0.4,0.5]
-# deit_small_4: 0.35 
+# deit_small_4: 0.35; deit_small_8: 0.5
+# deit_base_4: 0.35; deit_base_8: 0.4
+# deit_tiny: smoothquant-False; Res-False
+# vit-base_4: 0.4; vit-base_8: 0.5
 alpha_pool = [0.5] 
 bit_pool = [4,8]
 

@@ -160,11 +160,11 @@ class MinmaxObserver(BaseObserver):
                 score2 = lp_loss(out, out_2, p=2.0, reduction='all')
                 score3 = lp_loss(out, out_3, p=2.0, reduction='all')
                 score4 = lp_loss(out, out_4, p=2.0, reduction='all')
-                # score = [score1, score2, score3, score4]
-                score = [score2, score3]
+                score = [score1, score2, score3, score4]
+                # score = [score2, score3]
                 indx = score.index(min(score))
-                # alpha[j] = alpha_floor[j] -1 + indx
-                alpha[j] = alpha_floor[j] + indx
+                alpha[j] = alpha_floor[j] -1 + indx
+                # alpha[j] = alpha_floor[j] + indx
             return alpha
 
         if self.symmetric:
