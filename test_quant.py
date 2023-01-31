@@ -220,11 +220,14 @@ def main():
         elif args.mode == 0:
             # Get calibration set.
             image_list = []
+            # output_list = []
             for i, (data, target) in enumerate(train_loader):
                 if i == args.calib_iter:
                     break
                 data = data.to(device)
+                # target = target.to(device)
                 image_list.append(data)
+                # output_list.append(target)
 
             print("Calibrating with real data...")
             model.model_open_calibrate()
@@ -239,6 +242,8 @@ def main():
                 # model.model_quant(flag='off')
                 model.model_open_last_calibrate()
                 output, FLOPs, global_distance = model(image_list[0], plot=False)
+        # prec1, prec5 = accuracy(output.data, output_list[0], topk=(1, 5))
+        # print(prec1)
 
         model.model_close_calibrate()
         model.model_quant()
@@ -374,7 +379,7 @@ def main():
     #     print('')
     # ###############################################################
 
-    bit_config = [8]*50
+    bit_config = [4]*50
     print(bit_config)
     val_loss, val_prec1, val_prec5 = validate(args, val_loader, model,
                                             criterion, device, bit_config)

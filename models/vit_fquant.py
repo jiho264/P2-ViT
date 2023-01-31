@@ -8,7 +8,7 @@ import copy
 from collections import OrderedDict
 from functools import partial
 from itertools import repeat
-
+from .ptq.bit_type import BIT_TYPE_DICT, BIT_TYPE_LIST
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -27,7 +27,7 @@ __all__ = [
 # alpha_pool = [0.35,0.4,0.5]
 # deit_small_4: 0.35; deit_small_8: 0.5
 # deit_base_4: 0.35; deit_base_8: 0.4
-# deit_tiny: smoothquant-False; Res-False
+# deit_tiny: smoothquant-False; Res-True
 # vit-base_4: 0.4; vit-base_8: 0.5
 alpha_pool = [0.5] 
 bit_pool = [4,8]
@@ -177,7 +177,8 @@ class Attention(nn.Module):
         # x[0] = self.proj_drop(x[0])
         # x[1] = self.proj_drop(x[1])
         # return x
-
+        self.atten_bit_config = atten_bit_config
+        
         activation = []
         B, N, C = x.shape
         if atten_bit_config:
@@ -331,6 +332,10 @@ class Attention(nn.Module):
         x = self.proj_drop(x)
         return x
 
+    def get_requant_scale(self):
+        bit_config = self.atten_bit_config[1]
+        bit_type = 'int' + str(bit_config)
+        return (self.qact2.quantizer.scale*self.proj.quantizer.dic_scale[BIT_TYPE_DICT[bit_type].name])/self.qact3.quantizer.scale
 
 
 class Block(nn.Module):
@@ -713,6 +718,10 @@ class VisionTransformer(nn.Module):
             else:
                 plot = False
             x = blk(x, last_quantizer, FLOPs, global_distance, local_bit_config, plot, self.quant)
+            # TODO:
+            if bit_config:
+                scale = blk.attn.get_requant_scale()
+                print(torch.floor(torch.div(torch.log(scale),torch.log(torch.Tensor([2]).cuda()))))
         
         x = self.norm(x, self.blocks[-1].qact4.quantizer,
                       self.qact2.quantizer)[:, 0]

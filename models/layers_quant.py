@@ -198,7 +198,7 @@ class Mlp(nn.Module):
         self.drop = nn.Dropout(drop)
         self.channel_scale = None
 
-    def forward(self, x, FLOPs, global_distance, ffn_bit_config, plot=False, quant=False, smoothquant=True):
+    def forward(self, x, FLOPs, global_distance, ffn_bit_config, plot=False, quant=True, smoothquant=False):
         # x = self.fc1(x)
         # x[0] = self.act(x[0])
         # x[1] = self.act(x[1])

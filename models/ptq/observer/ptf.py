@@ -89,9 +89,9 @@ class PtfObserver(BaseObserver):
                     alpha[j] = alpha_floor[j]+1
             return alpha
         # FIXME:
-        alpha_ceil = round_ln(scale8, 'ceil')
+        # alpha_ceil = round_ln(scale8, 'ceil')
         # alpha_x = round_x(scale8)
-        scale8 = 2**alpha_ceil
+        # scale8 = 2**alpha_ceil
         #############################################
         scale8.clamp_(self.eps)
         scale4 = scale8 / 2
