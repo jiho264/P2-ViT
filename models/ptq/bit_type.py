@@ -40,7 +40,8 @@ class BitType:
 
 
 BIT_TYPE_LIST = [
-    # BitType(4, False, 'uint4'),
+    BitType(3, False, 'uint3'),
+    BitType(4, False, 'uint4'),
     # BitType(2, True, 'int2'),
     # BitType(3, True, 'int3'),
     BitType(4, True, 'int4'),

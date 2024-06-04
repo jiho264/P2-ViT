@@ -16,4 +16,7 @@ str2observer = {
 
 def build_observer(observer_str, module_type, bit_type, calibration_mode):
     observer = str2observer[observer_str]
+    # if observer_str == 'minmax':
+    #     return observer(module_type, bit_type, calibration_mode, Percentile)
+    # else:
     return observer(module_type, bit_type, calibration_mode)

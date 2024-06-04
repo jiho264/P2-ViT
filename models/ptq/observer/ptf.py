@@ -97,7 +97,7 @@ class PtfObserver(BaseObserver):
         scale4 = scale8 / 2
         scale2 = scale4 / 2
         scale1 = scale2 / 2
-        scale0 = scale1 / 2
+        # scale0 = scale1 / 2
         # TODO:
         # ############## asymmetric ################
         # zero_point = qmin - torch.round(min_val_t / scale8)
@@ -111,8 +111,8 @@ class PtfObserver(BaseObserver):
             # FIXME:
             data = inputs[..., j].unsqueeze(-1)
             data_gt = inputs[..., j].unsqueeze(-1)
-            data_q0 = ((data / scale0 + zero_point).round().clamp(qmin, qmax) -
-                       zero_point) * scale0
+            # data_q0 = ((data / scale0 + zero_point).round().clamp(qmin, qmax) -
+            #            zero_point) * scale0
             data_q1 = ((data / scale1 + zero_point).round().clamp(qmin, qmax) -
                        zero_point) * scale1
             data_q2 = ((data / scale2 + zero_point).round().clamp(qmin, qmax) -
@@ -121,15 +121,15 @@ class PtfObserver(BaseObserver):
                        zero_point) * scale4
             data_q8 = ((data / scale8 + zero_point).round().clamp(qmin, qmax) -
                        zero_point) * scale8
-            score0 = lp_loss(data_gt, data_q0, p=2.0, reduction='all')
+            # score0 = lp_loss(data_gt, data_q0, p=2.0, reduction='all')
             score1 = lp_loss(data_gt, data_q1, p=2.0, reduction='all')
             score2 = lp_loss(data_gt, data_q2, p=2.0, reduction='all')
             score4 = lp_loss(data_gt, data_q4, p=2.0, reduction='all')
             score8 = lp_loss(data_gt, data_q8, p=2.0, reduction='all')
-            score = [score0, score1, score2, score4, score8]
-            # score = [score1, score2, score4, score8]
+            # score = [score0, score1, score2, score4, score8]
+            score = [score1, score2, score4, score8]
             self.scale_mask[j] *= 2**score.index(min(score))
         # TODO:
-        scale = scale0 * self.scale_mask
+        scale = scale1 * self.scale_mask
         return scale, zero_point
 

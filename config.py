@@ -31,12 +31,14 @@ class Config:
 
         if lis:
             self.INT_SOFTMAX = True
-            # self.BIT_TYPE_S = BIT_TYPE_DICT['uint4']
+            # TODO:
+            # self.BIT_TYPE_S = BIT_TYPE_DICT['uint3']
+            self.BIT_TYPE_S = BIT_TYPE_DICT['uint4']
             self.OBSERVER_S = 'minmax'
             self.QUANTIZER_S = 'log2'
         else:
             self.INT_SOFTMAX = False
-            # self.BIT_TYPE_S = BIT_TYPE_DICT['uint8']
+            self.BIT_TYPE_S = BIT_TYPE_DICT['uint8']
             self.OBSERVER_S = self.OBSERVER_A
             self.QUANTIZER_S = self.QUANTIZER_A
         if ptf:

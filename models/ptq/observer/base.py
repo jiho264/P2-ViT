@@ -11,6 +11,7 @@ class BaseObserver:
         self.max_val = None
         self.min_val = None
         self.eps = torch.finfo(torch.float32).eps
+        # self.Percentile = Percentile
 
     def reshape_tensor(self, v):
         if not isinstance(v, torch.Tensor):

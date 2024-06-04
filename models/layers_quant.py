@@ -198,7 +198,7 @@ class Mlp(nn.Module):
         self.drop = nn.Dropout(drop)
         self.channel_scale = None
 
-    def forward(self, x, FLOPs, global_distance, ffn_bit_config, plot=False, quant=True, smoothquant=False):
+    def forward(self, x, FLOPs, global_distance, ffn_bit_config, plot=False, quant=True, smoothquant=True, activation=[], hessian_statistic=False):
         # x = self.fc1(x)
         # x[0] = self.act(x[0])
         # x[1] = self.act(x[1])
@@ -210,14 +210,14 @@ class Mlp(nn.Module):
         # x[0] = self.drop(x[0])
         # x[1] = self.drop(x[1])
         B, N, C = x.shape
-        activation = []
+        activation.append(x)
         if ffn_bit_config:
             bit_config = ffn_bit_config[0]
         else:
             bit_config = None
         
         # FIXME: smoothquant
-        if smoothquant:
+        if smoothquant and not hessian_statistic:
             if self.channel_scale == None:
                 def round_ln(x, type=None):
                     if type == 'ceil':
@@ -234,17 +234,17 @@ class Mlp(nn.Module):
                 local_max_x = torch.abs(x).max(axis=1).values
                 global_max_x = local_max_x.max(axis=0).values
                 max_weight = torch.abs(self.fc1.weight).max(axis=0).values
-        #         self.channel_scale = (global_max_x**0.5)/(max_weight**0.5)
-        #         aplha = round_ln(self.channel_scale, 'round')
-        #         self.channel_scale = 2**aplha
-        #     x_smoothed = x/self.channel_scale.reshape((1,1,-1))
-        #     weight_smoothed = self.fc1.weight*self.channel_scale.reshape((1,-1))
-        # else:
-        #     x_smoothed = x
-        #     weight_smoothed = None
-        # x = self.qact0(x_smoothed)
-        # activation.append(x)
-        # x = self.fc1(x, global_distance, bit_config, weight_smoothed)
+                #         self.channel_scale = (global_max_x**0.5)/(max_weight**0.5)
+                #         aplha = round_ln(self.channel_scale, 'round')
+                #         self.channel_scale = 2**aplha
+                #     x_smoothed = x/self.channel_scale.reshape((1,1,-1))
+                #     weight_smoothed = self.fc1.weight*self.channel_scale.reshape((1,-1))
+                # else:
+                #     x_smoothed = x
+                #     weight_smoothed = None
+                # x = self.qact0(x_smoothed)
+                # activation.append(x)
+                # x = self.fc1(x, global_distance, bit_config, weight_smoothed)
                 channel_scale_pool = []
                 self.best_scale = []
                 # gt = F.linear(x, self.qkv.weight, self.qkv.bias)
@@ -268,33 +268,35 @@ class Mlp(nn.Module):
                     
                     # observe to obtaion scaling factors
                     middle_out = self.qact0(x_smoothed)
-                    act_scale.append(self.qact0.quantizer.scale)
-                    act_zp.append(self.qact0.quantizer.zero_point)
-                    middle_out = self.fc1(middle_out, global_distance, bit_config, weight_smoothed)
-                    weight_scale.append(self.fc1.quantizer.dic_scale)
-                    weight_zp.append(self.fc1.quantizer.dic_zero_point)
-                    # compute loss
-                    self.qact0.calibrate = False
-                    self.qact0.quant = True
-                    middle_out = self.qact0(x_smoothed)
-                    self.fc1.calibrate = False
-                    self.fc1.quant = True
-                    for j, bit in enumerate(bit_pool):
-                        quant_out = self.fc1(middle_out, global_distance, bit, weight_smoothed)
-                        loss_pool[j].append((gt - quant_out).abs().pow(2.0).mean())
-                    self.qact0.quant = False
-                    self.qact0.calibrate = True
-                    self.fc1.quant = False
-                    self.fc1.calibrate = True
-                for loss in loss_pool:
-                    indx = loss.index(min(loss))
-                    self.channel_scale = channel_scale_pool[indx]
-                    self.best_scale.append(channel_scale_pool[indx])
-                    self.best_act_scale.append(act_scale[indx])
-                    self.best_act_zp.append(act_zp[indx])
-                    self.best_weight_scale.append(weight_scale[indx])
-                    self.best_weight_zp.append(weight_zp[indx])            
-
+                    if self.qact0.last_calibrate:
+                        act_scale.append(self.qact0.quantizer.scale)
+                        act_zp.append(self.qact0.quantizer.zero_point)
+                        middle_out = self.fc1(middle_out, global_distance, bit_config, weight_smoothed)
+                        weight_scale.append(self.fc1.quantizer.dic_scale)
+                        weight_zp.append(self.fc1.quantizer.dic_zero_point)
+                        # compute loss
+                        self.qact0.calibrate = False
+                        self.qact0.quant = True
+                        middle_out = self.qact0(x_smoothed)
+                        self.fc1.calibrate = False
+                        self.fc1.quant = True
+                        for j, bit in enumerate(bit_pool):
+                            quant_out = self.fc1(middle_out, global_distance, bit, weight_smoothed)
+                            loss_pool[j].append((gt - quant_out).abs().pow(2.0).mean())
+                        self.qact0.quant = False
+                        self.qact0.calibrate = True
+                        self.fc1.quant = False
+                        self.fc1.calibrate = True
+                if self.qact0.last_calibrate:
+                    for loss in loss_pool:
+                        indx = loss.index(min(loss))
+                        self.channel_scale = channel_scale_pool[indx]
+                        self.best_scale.append(channel_scale_pool[indx])
+                        self.best_act_scale.append(act_scale[indx])
+                        self.best_act_zp.append(act_zp[indx])
+                        self.best_weight_scale.append(weight_scale[indx])
+                        self.best_weight_zp.append(weight_zp[indx])            
+                    activation.append(x_smoothed)
                 x = gt
             else:
                 indx = bit_pool.index(bit_config)
@@ -309,6 +311,7 @@ class Mlp(nn.Module):
                 self.fc1.quantizer.dic_scale = self.best_weight_scale[indx] 
                 self.fc1.quantizer.dic_zero_point = self.best_weight_zp[indx] 
                 x = self.fc1(x, global_distance, bit_config, weight_smoothed)
+                
         else:
             x_smoothed = x
             weight_smoothed = None
@@ -316,14 +319,14 @@ class Mlp(nn.Module):
             activation.append(x)
             x = self.fc1(x, global_distance, bit_config, weight_smoothed)
 
-
+        # activation.append(x_smoothed)
         B, N, M = x.shape
         FLOPs.append(N*C*M)
         
         x = self.act(x)
         # TODO:
         x = self.qact1(x, asymmetric=False)
-        activation.append(x)
+        # activation.append(x)
         x = self.drop(x)
         
         B, N, C = x.shape

@@ -173,6 +173,7 @@ class MinmaxObserver(BaseObserver):
             scale = max_val / (float(qmax - qmin) / 2)
             # TODO: ########### 2^n ############
             alpha_x = round_x(scale, self.v)
+            # alpha_x = round_ln(scale, self.v)
             scale = 2**alpha_x
             # if self.module_type in ['conv_weight', 'linear_weight']:
             #     # alpha_x = round_x(scale, self.v)
