@@ -4,7 +4,7 @@ import matplotlib.gridspec as gridspec
 from matplotlib.collections import PolyCollection
 import torch
 
-def sub_plot_distribution(x, ax, j):
+def sub_plot_distribution(x, ax, i, j):
     # B, N, M = x.shape
     # # verts = []
     # if j==0:
@@ -57,21 +57,34 @@ def sub_plot_distribution(x, ax, j):
         # x_max_average.append(sum(x_max_total)/len(x_max_total))
         # x_min_average.append(sum(x_min_total)/len(x_min_total))
     xs = np.arange(length)
-    ax.plot(xs, x_max_max.cpu().detach().numpy(), color='g', alpha=0.8)
-    ax.plot(xs, x_min_min.cpu().detach().numpy(), color='g', alpha=0.8)
-    ax.set_xlabel(label)
+    ax.plot(xs, x_max_max.cpu().detach().numpy(), color='lightseagreen', alpha=1, label="Max")
+    ax.plot(xs, x_min_min.cpu().detach().numpy(), color='royalblue', alpha=0.8, label="Min")
+    position = ["lower left", "lower left", "lower right", "upper right"]
+    leg = ax.legend(fontsize=10, loc=position[i], ncol=1)
+    leg.get_frame().set_edgecolor("black")
+    leg.get_frame().set_linewidth(1.5)
+    ax.spines['bottom'].set_linewidth(1.5)
+    ax.spines['top'].set_linewidth(1.5)
+    ax.spines['left'].set_linewidth(1.5)
+    ax.spines['right'].set_linewidth(1.5)
+    # ax.set_xlabel(label)
 
 def plot_distribution(a, name, quant):
-    fig, ax = plt.subplots(2, len(a),figsize=(3*len(a), 6))
-    print("Ploting......")
-    # fig = plt.figure(figsize=(10, 25))
-    # gs = gridspec.GridSpec(1,4)
     for i in range(len(a)):
-        for j in range(2):
+        fig, ax = plt.subplots(1, 1,figsize=(3.1, 2))
+        print("Ploting......")
+        # fig = plt.figure(figsize=(10, 25))
+        # gs = gridspec.GridSpec(1,4)
+        # for i in range(len(a)):
+            # for j in range():
+        j = 1
         # ax = fig.add_subplot(gs[i], projection='3d')
-            sub_plot_distribution(a[i], ax[j][i], j)
-    if quant:
-        # TODO:
-        name += "_aa2n_ln_quant"
-    plt.savefig("figs/" + name + ".pdf")
+        sub_plot_distribution(a[i], ax, i, j)
+        if quant:
+            # TODO:
+            name += "_quant"
+        # else:
+            # name += "_smoothed"
+        plt.tight_layout()
+        plt.savefig("figs/vit_base/" + name + "_" + str(i)+ ".svg")
 

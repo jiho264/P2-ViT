@@ -25,8 +25,8 @@ parser.add_argument('model',
                     help='model')
 parser.add_argument('data', metavar='DIR', help='path to dataset')
 parser.add_argument('--quant', default=False, action='store_true')
-parser.add_argument('--ptf', default=False, action='store_true')
-parser.add_argument('--lis', default=False, action='store_true')
+parser.add_argument('--ptf', default=True)
+parser.add_argument('--lis', default=True)
 parser.add_argument('--quant-method',
                     default='minmax',
                     choices=['minmax', 'ema', 'omse', 'percentile'])

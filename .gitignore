@@ -10,7 +10,7 @@ __pycache__/
 logs/
 test.sh
 figs/
-figures/
+# figures/
 energy.pdf
 latency.pdf
 number_quant.py
