@@ -9,14 +9,15 @@ from tqdm import tqdm
 from utils import *
 
 
-model_zoo = {'deit_tiny': 'deit_tiny_patch16_224',
-            'deit_small': 'deit_small_patch16_224',
-            'deit_base': 'deit_base_patch16_224',
-            'vit_base': 'vit_base_patch16_224',
-            'vit_large': 'vit_large_patch16_224',
-            'swin_tiny': 'swin_tiny_patch4_window7_224',
-            'swin_small': 'swin_small_patch4_window7_224',
-            }
+model_zoo = {
+    "deit_tiny": "deit_tiny_patch16_224",
+    "deit_small": "deit_small_patch16_224",
+    "deit_base": "deit_base_patch16_224",
+    "vit_base": "vit_base_patch16_224",
+    "vit_large": "vit_large_patch16_224",
+    "swin_tiny": "swin_tiny_patch4_window7_224",
+    "swin_small": "swin_small_patch4_window7_224",
+}
 
 
 class AttentionMap:
@@ -38,7 +39,7 @@ def generate_data(args):
 
     # Hook the attention
     hooks = []
-    if 'swin' in args.model:
+    if "swin" in args.model:
         for m in p_model.layers:
             for n in range(len(m.blocks)):
                 hooks.append(AttentionMap(m.blocks[n].attn.matmul2))
@@ -51,11 +52,13 @@ def generate_data(args):
     img.requires_grad = True
 
     # Init optimizer
-    args.lr = 0.25 if 'swin' in args.model else 0.20
+    args.lr = 0.25 if "swin" in args.model else 0.20
     optimizer = optim.Adam([img], lr=args.lr, betas=[0.5, 0.9], eps=1e-8)
 
     # Set pseudo labels
-    pred = torch.LongTensor([random.randint(0, 999) for _ in range(args.batch_size)]).to('cuda')
+    pred = torch.LongTensor(
+        [random.randint(0, 999) for _ in range(args.batch_size)]
+    ).to("cuda")
     var_pred = random.uniform(2500, 3000)  # for batch_size 32
 
     criterion = nn.CrossEntropyLoss()
@@ -101,13 +104,19 @@ def generate_data(args):
                     # Hook attention
                     attention = hooks[itr_hook].feature
                     attention_p = attention.mean(dim=1)[:, 1:, :]
-                    sims = torch.cosine_similarity(attention_p.unsqueeze(1), attention_p.unsqueeze(2), dim=3)
+                    sims = torch.cosine_similarity(
+                        attention_p.unsqueeze(1), attention_p.unsqueeze(2), dim=3
+                    )
 
                     # Compute differential entropy
                     kde = KernelDensityEstimator(sims.view(args.batch_size, -1))
                     start_p = sims.min().item()
                     end_p = sims.max().item()
-                    x_plot = torch.linspace(start_p, end_p, steps=10).repeat(args.batch_size, 1).cuda()
+                    x_plot = (
+                        torch.linspace(start_p, end_p, steps=10)
+                        .repeat(args.batch_size, 1)
+                        .cuda()
+                    )
                     kde_estimate = kde(x_plot)
                     dif_entropy_estimated = differential_entropy(kde_estimate, x_plot)
                     loss_entropy -= dif_entropy_estimated
@@ -125,12 +134,12 @@ def generate_data(args):
     return img.detach()
 
 
-def differential_entropy(pdf, x_pdf):  
+def differential_entropy(pdf, x_pdf):
     # pdf is a vector because we want to perform a numerical integration
     pdf = pdf + 1e-4
     f = -1 * pdf * torch.log(pdf)
     # Integrate using the composite trapezoidal rule
-    ans = torch.trapz(f, x_pdf, dim=-1).mean()  
+    ans = torch.trapz(f, x_pdf, dim=-1).mean()
     return ans
 
 
@@ -141,7 +150,9 @@ def get_image_prior_losses(inputs_jit):
     diff3 = inputs_jit[:, :, 1:, :-1] - inputs_jit[:, :, :-1, 1:]
     diff4 = inputs_jit[:, :, :-1, :-1] - inputs_jit[:, :, 1:, 1:]
 
-    loss_var_l2 = torch.norm(diff1) + torch.norm(diff2) + torch.norm(diff3) + torch.norm(diff4)
+    loss_var_l2 = (
+        torch.norm(diff1) + torch.norm(diff2) + torch.norm(diff3) + torch.norm(diff4)
+    )
     return loss_var_l2
 
 
@@ -156,7 +167,7 @@ def clip(image_tensor, use_fp16=False):
     for c in range(3):
         m, s = mean[c], std[c]
         image_tensor[:, c] = torch.clamp(image_tensor[:, c], -m / s, (1 - m) / s)
-        #image_tensor[:, c] = torch.clamp(image_tensor[:, c], 0, 1)
+        # image_tensor[:, c] = torch.clamp(image_tensor[:, c], 0, 1)
     return image_tensor
 
 
@@ -164,7 +175,7 @@ def lr_policy(lr_fn):
     def _alr(optimizer, iteration, epoch):
         lr = lr_fn(iteration, epoch)
         for param_group in optimizer.param_groups:
-            param_group['lr'] = lr
+            param_group["lr"] = lr
 
     return _alr
 

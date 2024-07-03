@@ -12,11 +12,11 @@ def build_dataset(args):
         mean = (0.485, 0.456, 0.406)
         std = (0.229, 0.224, 0.225)
         crop_pct = 0.875
-    elif model_type == 'vit':
+    elif model_type == "vit":
         mean = (0.5, 0.5, 0.5)
         std = (0.5, 0.5, 0.5)
         crop_pct = 0.9
-    elif model_type == 'swin':
+    elif model_type == "swin":
         mean = (0.485, 0.456, 0.406)
         std = (0.229, 0.224, 0.225)
         crop_pct = 0.9
@@ -27,8 +27,8 @@ def build_dataset(args):
     val_transform = build_transform(mean=mean, std=std, crop_pct=crop_pct)
 
     # Data
-    traindir = os.path.join(args.dataset, 'train')
-    valdir = os.path.join(args.dataset, 'val')
+    traindir = os.path.join(args.dataset, "train")
+    valdir = os.path.join(args.dataset, "val")
 
     val_dataset = datasets.ImageFolder(valdir, val_transform)
     val_loader = torch.utils.data.DataLoader(
@@ -48,13 +48,17 @@ def build_dataset(args):
         pin_memory=True,
         drop_last=True,
     )
-    
+
     return train_loader, val_loader
 
 
-def build_transform(input_size=224, interpolation="bicubic",
-                    mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225),
-                    crop_pct=0.875):
+def build_transform(
+    input_size=224,
+    interpolation="bicubic",
+    mean=(0.485, 0.456, 0.406),
+    std=(0.229, 0.224, 0.225),
+    crop_pct=0.875,
+):
     def _pil_interp(method):
         if method == "bicubic":
             return Image.BICUBIC
@@ -64,6 +68,7 @@ def build_transform(input_size=224, interpolation="bicubic",
             return Image.HAMMING
         else:
             return Image.BILINEAR
+
     resize_im = input_size > 32
     t = []
     if resize_im:

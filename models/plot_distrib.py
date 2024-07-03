@@ -4,6 +4,7 @@ import matplotlib.gridspec as gridspec
 from matplotlib.collections import PolyCollection
 import torch
 
+
 def sub_plot_distribution(x, ax, i, j):
     # B, N, M = x.shape
     # # verts = []
@@ -30,14 +31,14 @@ def sub_plot_distribution(x, ax, i, j):
     B, N, M = x.shape
     # x_max_average = []
     # x_min_average = []
-    if j==0:
+    if j == 0:
         length = N
-        label = 'Token'
+        label = "Token"
         x_max = x.max(axis=2).values
         x_min = x.min(axis=2).values
     else:
         length = M
-        label = 'Channel'
+        label = "Channel"
         x_max = x.max(axis=1).values
         x_min = x.min(axis=1).values
     # x_max_mean = torch.mean(x_max, 0)
@@ -45,38 +46,47 @@ def sub_plot_distribution(x, ax, i, j):
     x_max_max = x_max.max(axis=0).values
     x_min_min = x_min.min(axis=0).values
     # for t in range(length):
-        # x_max_total = []
-        # x_min_total = []
-        # for k in range(30):
-            # if j==0:
-            #     x_new = x.max(axis=2).values
-            # else:
-            #     x_new = x.max(axis=1).values
-            # x_max_total.append(max(x_new))
-            # x_min_total.append(min(x_new))
-        # x_max_average.append(sum(x_max_total)/len(x_max_total))
-        # x_min_average.append(sum(x_min_total)/len(x_min_total))
+    # x_max_total = []
+    # x_min_total = []
+    # for k in range(30):
+    # if j==0:
+    #     x_new = x.max(axis=2).values
+    # else:
+    #     x_new = x.max(axis=1).values
+    # x_max_total.append(max(x_new))
+    # x_min_total.append(min(x_new))
+    # x_max_average.append(sum(x_max_total)/len(x_max_total))
+    # x_min_average.append(sum(x_min_total)/len(x_min_total))
     xs = np.arange(length)
-    ax.plot(xs, x_max_max.cpu().detach().numpy(), color='lightseagreen', alpha=1, label="Max")
-    ax.plot(xs, x_min_min.cpu().detach().numpy(), color='royalblue', alpha=0.8, label="Min")
+    ax.plot(
+        xs,
+        x_max_max.cpu().detach().numpy(),
+        color="lightseagreen",
+        alpha=1,
+        label="Max",
+    )
+    ax.plot(
+        xs, x_min_min.cpu().detach().numpy(), color="royalblue", alpha=0.8, label="Min"
+    )
     position = ["lower left", "lower left", "lower right", "upper right"]
     leg = ax.legend(fontsize=10, loc=position[i], ncol=1)
     leg.get_frame().set_edgecolor("black")
     leg.get_frame().set_linewidth(1.5)
-    ax.spines['bottom'].set_linewidth(1.5)
-    ax.spines['top'].set_linewidth(1.5)
-    ax.spines['left'].set_linewidth(1.5)
-    ax.spines['right'].set_linewidth(1.5)
+    ax.spines["bottom"].set_linewidth(1.5)
+    ax.spines["top"].set_linewidth(1.5)
+    ax.spines["left"].set_linewidth(1.5)
+    ax.spines["right"].set_linewidth(1.5)
     # ax.set_xlabel(label)
+
 
 def plot_distribution(a, name, quant):
     for i in range(len(a)):
-        fig, ax = plt.subplots(1, 1,figsize=(3.1, 2))
+        fig, ax = plt.subplots(1, 1, figsize=(3.1, 2))
         print("Ploting......")
         # fig = plt.figure(figsize=(10, 25))
         # gs = gridspec.GridSpec(1,4)
         # for i in range(len(a)):
-            # for j in range():
+        # for j in range():
         j = 1
         # ax = fig.add_subplot(gs[i], projection='3d')
         sub_plot_distribution(a[i], ax, i, j)
@@ -84,7 +94,6 @@ def plot_distribution(a, name, quant):
             # TODO:
             name += "_quant"
         # else:
-            # name += "_smoothed"
+        # name += "_smoothed"
         plt.tight_layout()
-        plt.savefig("figs/vit_base/" + name + "_" + str(i)+ ".svg")
-
+        plt.savefig("figs/vit_base/" + name + "_" + str(i) + ".svg")

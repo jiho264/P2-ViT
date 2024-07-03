@@ -37,8 +37,7 @@ class GenerativeModel(abc.ABC, nn.Module):
         return next(self.parameters()).device
 
     @abc.abstractmethod
-    def sample(self, n_samples):
-        ...
+    def sample(self, n_samples): ...
 
 
 class Kernel(abc.ABC, nn.Module):
@@ -75,8 +74,8 @@ class ParzenWindowKernel(Kernel):
         dims = tuple(range(len(abs_diffs.shape))[1:])
         dim = np.prod(abs_diffs.shape[1:])
         inside = torch.sum(abs_diffs / self.bandwidth <= 0.5, dim=dims) == dim
-        coef = 1 / self.bandwidth ** dim
-        return (coef * inside) #.mean() #dim=1
+        coef = 1 / self.bandwidth**dim
+        return coef * inside  # .mean() #dim=1
 
     def sample(self, train_Xs):
         device = train_Xs.device
@@ -90,8 +89,8 @@ class GaussianKernel(Kernel):
     def forward(self, test_Xs, train_Xs):
         diffs = self._diffs(test_Xs, train_Xs)
         dims = tuple(range(len(diffs.shape))[2:])
-        var = self.bandwidth ** 2
-        exp = torch.exp(- torch.pow(diffs,2) / (2 * var))
+        var = self.bandwidth**2
+        exp = torch.exp(-torch.pow(diffs, 2) / (2 * var))
         coef = 1 / torch.sqrt(torch.tensor(2 * np.pi * var))
         return (coef * exp).mean(dim=-1)
 

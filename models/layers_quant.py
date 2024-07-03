@@ -6,34 +6,46 @@ from itertools import repeat
 
 import torch
 import torch.nn.functional as F
-from torch import nn
+from torch import Tensor, nn
 from .plot_distrib import plot_distribution
 from .ptq import QAct, QConv2d, QLinear
 
 # alpha_pool = [0.35,0.4,0.5,0.55]
 alpha_pool = [0.5]
-bit_pool = [4,8]
+bit_pool = [4, 8]
 
-def smoothquant_process(weight, act, ):
+
+def smoothquant_process(
+    weight,
+    act,
+):
     def round_ln(x, type=None):
-        if type == 'ceil':
-            return torch.ceil(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
-        elif type == 'floor':
-            return torch.floor(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
+        if type == "ceil":
+            return torch.ceil(
+                torch.div(torch.log(x), torch.log(torch.Tensor([2]).cuda()))
+            )
+        elif type == "floor":
+            return torch.floor(
+                torch.div(torch.log(x), torch.log(torch.Tensor([2]).cuda()))
+            )
         else:
-            y = torch.floor(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
-            out = torch.gt((x-2**y),(2**(y+1)-x))
-            return out+y
+            y = torch.floor(
+                torch.div(torch.log(x), torch.log(torch.Tensor([2]).cuda()))
+            )
+            out = torch.gt((x - 2**y), (2 ** (y + 1) - x))
+            return out + y
+
     c_out, c_in = weight.shape
     B, token, c_in = act.shape
     # channel-wise scaling factors
     local_max_x = torch.abs(act).max(axis=1).values
     global_max_x = local_max_x.max(axis=0).values
     max_weight = torch.abs(weight).max(axis=0).values
-    channel_scale = (global_max_x**0.5)/(max_weight**0.5)
-    aplha = round_ln(channel_scale, 'round')
+    channel_scale = (global_max_x**0.5) / (max_weight**0.5)
+    aplha = round_ln(channel_scale, "round")
     channel_scale = 2**aplha
     return channel_scale
+
 
 def _ntuple(n):
 
@@ -57,8 +69,8 @@ def _no_grad_trunc_normal_(tensor, mean, std, a, b):
 
     if (mean < a - 2 * std) or (mean > b + 2 * std):
         warnings.warn(
-            'mean is more than 2 std from [a, b] in nn.init.trunc_normal_. '
-            'The distribution of values may be incorrect.',
+            "mean is more than 2 std from [a, b] in nn.init.trunc_normal_. "
+            "The distribution of values may be incorrect.",
             stacklevel=2,
         )
 
@@ -118,10 +130,10 @@ def drop_path(x, drop_prob: float = 0.0, training: bool = False):
     if drop_prob == 0.0 or not training:
         return x
     keep_prob = 1 - drop_prob
-    shape = (x.shape[0], ) + (1, ) * (
-        x.ndim - 1)  # work with diff dim tensors, not just 2D ConvNets
-    random_tensor = keep_prob + \
-        torch.rand(shape, dtype=x.dtype, device=x.device)
+    shape = (x.shape[0],) + (1,) * (
+        x.ndim - 1
+    )  # work with diff dim tensors, not just 2D ConvNets
+    random_tensor = keep_prob + torch.rand(shape, dtype=x.dtype, device=x.device)
     random_tensor.floor_()  # binarize
     output = x.div(keep_prob) * random_tensor
     return output
@@ -140,55 +152,67 @@ class DropPath(nn.Module):
 
 class Mlp(nn.Module):
 
-    def __init__(self,
-                 in_features,
-                 hidden_features=None,
-                 out_features=None,
-                 act_layer=nn.GELU,
-                 drop=0.0,
-                 quant=False,
-                 calibrate=False,
-                 cfg=None):
+    def __init__(
+        self,
+        in_features,
+        hidden_features=None,
+        out_features=None,
+        act_layer=nn.GELU,
+        drop=0.0,
+        quant=False,
+        calibrate=False,
+        cfg=None,
+    ):
         super().__init__()
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
         # self.fc1 = nn.Linear(in_features, hidden_features)
-        self.qact0 = QAct(quant=quant,
-                          calibrate=calibrate,
-                          bit_type=cfg.BIT_TYPE_A,
-                          calibration_mode=cfg.CALIBRATION_MODE_A,
-                          observer_str=cfg.OBSERVER_A,
-                          quantizer_str=cfg.QUANTIZER_A)
-        self.fc1 = QLinear(in_features,
-                           hidden_features,
-                           quant=quant,
-                           calibrate=calibrate,
-                           bit_type=cfg.BIT_TYPE_W,
-                           calibration_mode=cfg.CALIBRATION_MODE_W,
-                           observer_str=cfg.OBSERVER_W,
-                           quantizer_str=cfg.QUANTIZER_W)
+        self.qact0 = QAct(
+            quant=quant,
+            calibrate=calibrate,
+            bit_type=cfg.BIT_TYPE_A,
+            calibration_mode=cfg.CALIBRATION_MODE_A,
+            observer_str=cfg.OBSERVER_A,
+            quantizer_str=cfg.QUANTIZER_A,
+        )
+        self.fc1 = QLinear(
+            in_features,
+            hidden_features,
+            quant=quant,
+            calibrate=calibrate,
+            bit_type=cfg.BIT_TYPE_W,
+            calibration_mode=cfg.CALIBRATION_MODE_W,
+            observer_str=cfg.OBSERVER_W,
+            quantizer_str=cfg.QUANTIZER_W,
+        )
         self.act = act_layer()
-        self.qact1 = QAct(quant=quant,
-                          calibrate=calibrate,
-                          bit_type=cfg.BIT_TYPE_A,
-                          calibration_mode=cfg.CALIBRATION_MODE_A,
-                          observer_str=cfg.OBSERVER_A,
-                          quantizer_str=cfg.QUANTIZER_A)
+        self.qact1 = QAct(
+            quant=quant,
+            calibrate=calibrate,
+            bit_type=cfg.BIT_TYPE_A,
+            calibration_mode=cfg.CALIBRATION_MODE_A,
+            observer_str=cfg.OBSERVER_A,
+            quantizer_str=cfg.QUANTIZER_A,
+        )
         # self.fc2 = nn.Linear(hidden_features, out_features)
-        self.fc2 = QLinear(hidden_features,
-                           out_features,
-                           quant=quant,
-                           calibrate=calibrate,
-                           bit_type=cfg.BIT_TYPE_W,
-                           calibration_mode=cfg.CALIBRATION_MODE_W,
-                           observer_str=cfg.OBSERVER_W,
-                           quantizer_str=cfg.QUANTIZER_W)
-        self.qact2 = QAct(quant=quant,
-                          calibrate=calibrate,
-                          bit_type=cfg.BIT_TYPE_A,
-                          calibration_mode=cfg.CALIBRATION_MODE_A_LN,
-                          observer_str=cfg.OBSERVER_A_LN,
-                          quantizer_str=cfg.QUANTIZER_A_LN)
+        self.fc2 = QLinear(
+            hidden_features,
+            out_features,
+            quant=quant,
+            calibrate=calibrate,
+            bit_type=cfg.BIT_TYPE_W,
+            calibration_mode=cfg.CALIBRATION_MODE_W,
+            observer_str=cfg.OBSERVER_W,
+            quantizer_str=cfg.QUANTIZER_W,
+        )
+        self.qact2 = QAct(
+            quant=quant,
+            calibrate=calibrate,
+            bit_type=cfg.BIT_TYPE_A,
+            calibration_mode=cfg.CALIBRATION_MODE_A_LN,
+            observer_str=cfg.OBSERVER_A_LN,
+            quantizer_str=cfg.QUANTIZER_A_LN,
+        )
         # self.qact2 = QAct(quant=quant,
         #                   calibrate=calibrate,
         #                   bit_type=cfg.BIT_TYPE_A,
@@ -198,7 +222,18 @@ class Mlp(nn.Module):
         self.drop = nn.Dropout(drop)
         self.channel_scale = None
 
-    def forward(self, x, FLOPs, global_distance, ffn_bit_config, plot=False, quant=True, smoothquant=True, activation=[], hessian_statistic=False):
+    def forward(
+        self,
+        x,
+        FLOPs,
+        global_distance,
+        ffn_bit_config,
+        plot=False,
+        quant=True,
+        smoothquant=True,
+        activation=[],
+        hessian_statistic=False,
+    ):
         # x = self.fc1(x)
         # x[0] = self.act(x[0])
         # x[1] = self.act(x[1])
@@ -215,19 +250,27 @@ class Mlp(nn.Module):
             bit_config = ffn_bit_config[0]
         else:
             bit_config = None
-        
+
         # FIXME: smoothquant
         if smoothquant and not hessian_statistic:
             if self.channel_scale == None:
+
                 def round_ln(x, type=None):
-                    if type == 'ceil':
-                        return torch.ceil(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
-                    elif type == 'floor':
-                        return torch.floor(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
+                    if type == "ceil":
+                        return torch.ceil(
+                            torch.div(torch.log(x), torch.log(torch.Tensor([2]).cuda()))
+                        )
+                    elif type == "floor":
+                        return torch.floor(
+                            torch.div(torch.log(x), torch.log(torch.Tensor([2]).cuda()))
+                        )
                     else:
-                        y = torch.floor(torch.div(torch.log(x),torch.log(torch.Tensor([2]).cuda())))
-                        out = torch.gt((x-2**y),(2**(y+1)-x))
-                        return out+y
+                        y = torch.floor(
+                            torch.div(torch.log(x), torch.log(torch.Tensor([2]).cuda()))
+                        )
+                        out = torch.gt((x - 2**y), (2 ** (y + 1) - x))
+                        return out + y
+
                 c_out, c_in = self.fc1.weight.shape
                 B, token, c_in = x.shape
                 # channel-wise scaling factors
@@ -248,7 +291,7 @@ class Mlp(nn.Module):
                 channel_scale_pool = []
                 self.best_scale = []
                 # gt = F.linear(x, self.qkv.weight, self.qkv.bias)
-                loss_pool = [[],[]]
+                loss_pool = [[], []]
                 act_scale = []
                 act_zp = []
                 weight_scale = []
@@ -258,20 +301,22 @@ class Mlp(nn.Module):
                 self.best_weight_scale = []
                 self.best_weight_zp = []
                 for i, alpha in enumerate(alpha_pool):
-                    channel_scale = global_max_x**alpha/(max_weight**(1-alpha))
-                    aplha = round_ln(channel_scale, 'round')
+                    channel_scale = global_max_x**alpha / (max_weight ** (1 - alpha))
+                    aplha = round_ln(channel_scale, "round")
                     channel_scale = 2**aplha
                     channel_scale_pool.append(channel_scale)
-                    x_smoothed = x/channel_scale.reshape((1,1,-1))
-                    weight_smoothed = self.fc1.weight*channel_scale.reshape((1,-1))
+                    x_smoothed = x / channel_scale.reshape((1, 1, -1))
+                    weight_smoothed = self.fc1.weight * channel_scale.reshape((1, -1))
                     gt = F.linear(x_smoothed, weight_smoothed, self.fc1.bias)
-                    
+
                     # observe to obtaion scaling factors
                     middle_out = self.qact0(x_smoothed)
                     if self.qact0.last_calibrate:
                         act_scale.append(self.qact0.quantizer.scale)
                         act_zp.append(self.qact0.quantizer.zero_point)
-                        middle_out = self.fc1(middle_out, global_distance, bit_config, weight_smoothed)
+                        middle_out = self.fc1(
+                            middle_out, global_distance, bit_config, weight_smoothed
+                        )
                         weight_scale.append(self.fc1.quantizer.dic_scale)
                         weight_zp.append(self.fc1.quantizer.dic_zero_point)
                         # compute loss
@@ -281,7 +326,9 @@ class Mlp(nn.Module):
                         self.fc1.calibrate = False
                         self.fc1.quant = True
                         for j, bit in enumerate(bit_pool):
-                            quant_out = self.fc1(middle_out, global_distance, bit, weight_smoothed)
+                            quant_out = self.fc1(
+                                middle_out, global_distance, bit, weight_smoothed
+                            )
                             loss_pool[j].append((gt - quant_out).abs().pow(2.0).mean())
                         self.qact0.quant = False
                         self.qact0.calibrate = True
@@ -295,23 +342,23 @@ class Mlp(nn.Module):
                         self.best_act_scale.append(act_scale[indx])
                         self.best_act_zp.append(act_zp[indx])
                         self.best_weight_scale.append(weight_scale[indx])
-                        self.best_weight_zp.append(weight_zp[indx])            
+                        self.best_weight_zp.append(weight_zp[indx])
                     activation.append(x_smoothed)
                 x = gt
             else:
                 indx = bit_pool.index(bit_config)
-                self.channel_scale = self.best_scale[indx]    
-                x_smoothed = x/self.channel_scale.reshape((1,1,-1))
-                weight_smoothed = self.fc1.weight*self.channel_scale.reshape((1,-1))
+                self.channel_scale = self.best_scale[indx]
+                x_smoothed = x / self.channel_scale.reshape((1, 1, -1))
+                weight_smoothed = self.fc1.weight * self.channel_scale.reshape((1, -1))
 
-                self.qact0.quantizer.scale = self.best_act_scale[indx] 
-                self.qact0.quantizer.zero_point = self.best_act_zp[indx] 
+                self.qact0.quantizer.scale = self.best_act_scale[indx]
+                self.qact0.quantizer.zero_point = self.best_act_zp[indx]
                 x = self.qact0(x_smoothed)
                 activation.append(x)
-                self.fc1.quantizer.dic_scale = self.best_weight_scale[indx] 
-                self.fc1.quantizer.dic_zero_point = self.best_weight_zp[indx] 
+                self.fc1.quantizer.dic_scale = self.best_weight_scale[indx]
+                self.fc1.quantizer.dic_zero_point = self.best_weight_zp[indx]
                 x = self.fc1(x, global_distance, bit_config, weight_smoothed)
-                
+
         else:
             x_smoothed = x
             weight_smoothed = None
@@ -321,14 +368,14 @@ class Mlp(nn.Module):
 
         # activation.append(x_smoothed)
         B, N, M = x.shape
-        FLOPs.append(N*C*M)
-        
+        FLOPs.append(N * C * M)
+
         x = self.act(x)
         # TODO:
         x = self.qact1(x, asymmetric=False)
         # activation.append(x)
         x = self.drop(x)
-        
+
         B, N, C = x.shape
         if ffn_bit_config:
             bit_config = ffn_bit_config[1]
@@ -336,12 +383,12 @@ class Mlp(nn.Module):
             bit_config = None
         x = self.fc2(x, global_distance, bit_config)
         B, N, M = x.shape
-        FLOPs.append(N*C*M)
-        
+        FLOPs.append(N * C * M)
+
         x = self.qact2(x)
         activation.append(x)
         if plot:
-            plot_distribution(activation, 'MLP', quant)
+            plot_distribution(activation, "MLP", quant)
         x = self.drop(x)
         return x
 
@@ -349,35 +396,38 @@ class Mlp(nn.Module):
 class PatchEmbed(nn.Module):
     """Image to Patch Embedding"""
 
-    def __init__(self,
-                 img_size=224,
-                 patch_size=16,
-                 in_chans=3,
-                 embed_dim=768,
-                 norm_layer=None,
-                 quant=False,
-                 calibrate=False,
-                 cfg=None):
+    def __init__(
+        self,
+        img_size=224,
+        patch_size=16,
+        in_chans=3,
+        embed_dim=768,
+        norm_layer=None,
+        quant=False,
+        calibrate=False,
+        cfg=None,
+    ):
         super().__init__()
         img_size = to_2tuple(img_size)
         patch_size = to_2tuple(patch_size)
         self.img_size = img_size
         self.patch_size = patch_size
 
-        self.grid_size = (img_size[0] // patch_size[0],
-                          img_size[1] // patch_size[1])
+        self.grid_size = (img_size[0] // patch_size[0], img_size[1] // patch_size[1])
         self.num_patches = self.grid_size[0] * self.grid_size[1]
 
-        self.proj = QConv2d(in_chans,
-                            embed_dim,
-                            kernel_size=patch_size,
-                            stride=patch_size,
-                            quant=quant,
-                            calibrate=calibrate,
-                            bit_type=cfg.BIT_TYPE_W,
-                            calibration_mode=cfg.CALIBRATION_MODE_W,
-                            observer_str=cfg.OBSERVER_W,
-                            quantizer_str=cfg.QUANTIZER_W)
+        self.proj = QConv2d(
+            in_chans,
+            embed_dim,
+            kernel_size=patch_size,
+            stride=patch_size,
+            quant=quant,
+            calibrate=calibrate,
+            bit_type=cfg.BIT_TYPE_W,
+            calibration_mode=cfg.CALIBRATION_MODE_W,
+            observer_str=cfg.OBSERVER_W,
+            quantizer_str=cfg.QUANTIZER_W,
+        )
         self.patch_size = patch_size
         if norm_layer:
             self.qact_before_norm = QAct(
@@ -386,23 +436,28 @@ class PatchEmbed(nn.Module):
                 bit_type=cfg.BIT_TYPE_A,
                 calibration_mode=cfg.CALIBRATION_MODE_A,
                 observer_str=cfg.OBSERVER_A,
-                quantizer_str=cfg.QUANTIZER_A)
+                quantizer_str=cfg.QUANTIZER_A,
+            )
             self.norm = norm_layer(embed_dim)
-            self.qact = QAct(quant=quant,
-                             calibrate=calibrate,
-                             bit_type=cfg.BIT_TYPE_A,
-                             calibration_mode=cfg.CALIBRATION_MODE_A,
-                             observer_str=cfg.OBSERVER_A,
-                             quantizer_str=cfg.QUANTIZER_A)
+            self.qact = QAct(
+                quant=quant,
+                calibrate=calibrate,
+                bit_type=cfg.BIT_TYPE_A,
+                calibration_mode=cfg.CALIBRATION_MODE_A,
+                observer_str=cfg.OBSERVER_A,
+                quantizer_str=cfg.QUANTIZER_A,
+            )
         else:
             self.qact_before_norm = nn.Identity()
             self.norm = nn.Identity()
-            self.qact = QAct(quant=quant,
-                             calibrate=calibrate,
-                             bit_type=cfg.BIT_TYPE_A,
-                             calibration_mode=cfg.CALIBRATION_MODE_A,
-                             observer_str=cfg.OBSERVER_A,
-                             quantizer_str=cfg.QUANTIZER_A)
+            self.qact = QAct(
+                quant=quant,
+                calibrate=calibrate,
+                bit_type=cfg.BIT_TYPE_A,
+                calibration_mode=cfg.CALIBRATION_MODE_A,
+                observer_str=cfg.OBSERVER_A,
+                quantizer_str=cfg.QUANTIZER_A,
+            )
 
     def forward(self, x, FLOPs, bit_config):
         # B, C, H, W = x[0].shape
@@ -430,15 +485,14 @@ class PatchEmbed(nn.Module):
         ), f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
         x = self.proj(x, bit_config)
         B, M, H, W = x.shape
-        FLOPs.append(C*self.patch_size[0]*self.patch_size[0]*M*H*W)
+        FLOPs.append(C * self.patch_size[0] * self.patch_size[0] * M * H * W)
         x = x.flatten(2).transpose(1, 2)
-        
+
         x = self.qact_before_norm(x)
         if isinstance(self.norm, nn.Identity):
             x = self.norm(x)
         else:
-            x = self.norm(x, self.qact_before_norm.quantizer,
-                          self.qact.quantizer)
+            x = self.norm(x, self.qact_before_norm.quantizer, self.qact.quantizer)
         x = self.qact(x)
         return x
 
@@ -448,12 +502,9 @@ class HybridEmbed(nn.Module):
     Extract feature map from CNN, flatten, project to embedding dim.
     """
 
-    def __init__(self,
-                 backbone,
-                 img_size=224,
-                 feature_size=None,
-                 in_chans=3,
-                 embed_dim=768):
+    def __init__(
+        self, backbone, img_size=224, feature_size=None, in_chans=3, embed_dim=768
+    ):
         super().__init__()
         assert isinstance(backbone, nn.Module)
         img_size = to_2tuple(img_size)
@@ -467,8 +518,7 @@ class HybridEmbed(nn.Module):
                 training = backbone.training
                 if training:
                     backbone.eval()
-                o = self.backbone(
-                    torch.zeros(1, in_chans, img_size[0], img_size[1]))
+                o = self.backbone(torch.zeros(1, in_chans, img_size[0], img_size[1]))
                 if isinstance(o, (list, tuple)):
                     # last feature if backbone outputs list/tuple of features
                     o = o[-1]
@@ -477,7 +527,7 @@ class HybridEmbed(nn.Module):
                 backbone.train(training)
         else:
             feature_size = to_2tuple(feature_size)
-            if hasattr(self.backbone, 'feature_info'):
+            if hasattr(self.backbone, "feature_info"):
                 feature_dim = self.backbone.feature_info.channels()[-1]
             else:
                 feature_dim = self.backbone.num_features
@@ -487,7 +537,6 @@ class HybridEmbed(nn.Module):
     def forward(self, x):
         x = self.backbone(x)
         if isinstance(x, (list, tuple)):
-            x = x[
-                -1]  # last feature if backbone outputs list/tuple of features
+            x = x[-1]  # last feature if backbone outputs list/tuple of features
         x = self.proj(x).flatten(2).transpose(1, 2)
         return x

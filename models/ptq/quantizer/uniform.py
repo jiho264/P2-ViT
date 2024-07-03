@@ -23,9 +23,8 @@ class UniformQuantizer(BaseQuantizer):
         self.dic_zero_point = {}
 
     def update_quantization_params(self, *args, **kwargs):
-        scale, zero_point = self.observer.get_quantization_params(
-            *args, **kwargs)
-        if self.module_type == 'activation':
+        scale, zero_point = self.observer.get_quantization_params(*args, **kwargs)
+        if self.module_type == "activation":
             self.scale = scale
             self.zero_point = zero_point
         # elif self.bit_type == BIT_TYPE_DICT['int4']:
@@ -45,11 +44,10 @@ class UniformQuantizer(BaseQuantizer):
         else:
             self.dic_scale[self.bit_type.name] = scale
             self.dic_zero_point[self.bit_type.name] = zero_point
-            
 
     def quant(self, inputs, scale=None, zero_point=None):
         if scale is None:
-            if self.module_type == 'activation':
+            if self.module_type == "activation":
                 scale = self.scale
             # elif self.bit_type == BIT_TYPE_DICT['int4']:
             #     scale = self.int4_scale
@@ -64,7 +62,7 @@ class UniformQuantizer(BaseQuantizer):
             else:
                 scale = self.dic_scale[self.bit_type.name]
         if zero_point is None:
-            if self.module_type == 'activation':
+            if self.module_type == "activation":
                 zero_point = self.zero_point
             # elif self.bit_type == BIT_TYPE_DICT['int4']:
             #     zero_point = self.int4_zero_point
@@ -83,8 +81,9 @@ class UniformQuantizer(BaseQuantizer):
         scale = scale.reshape(range_shape)
         zero_point = zero_point.reshape(range_shape)
         outputs = inputs.cuda() / scale.cuda() + zero_point.cuda()
-        outputs = outputs.round().clamp(self.bit_type.lower_bound,
-                                        self.bit_type.upper_bound)
+        outputs = outputs.round().clamp(
+            self.bit_type.lower_bound, self.bit_type.upper_bound
+        )
         return outputs
 
     def dequantize(self, inputs, scale=None, zero_point=None):
@@ -93,7 +92,7 @@ class UniformQuantizer(BaseQuantizer):
         # if zero_point is None:
         #     zero_point = self.zero_point
         if scale is None:
-            if self.module_type == 'activation':
+            if self.module_type == "activation":
                 scale = self.scale
             # elif self.bit_type == BIT_TYPE_DICT['int4']:
             #     scale = self.int4_scale
@@ -107,7 +106,7 @@ class UniformQuantizer(BaseQuantizer):
                 # AssertionError
                 scale = self.dic_scale[self.bit_type.name]
         if zero_point is None:
-            if self.module_type == 'activation':
+            if self.module_type == "activation":
                 zero_point = self.zero_point
             # elif self.bit_type == BIT_TYPE_DICT['int4']:
             #     zero_point = self.int4_zero_point
